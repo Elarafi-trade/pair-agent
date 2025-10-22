@@ -190,3 +190,39 @@ npx tsx scripts/migrate.ts
 1. Update backend to write to Neon
 2. Create migration script for existing data
 3. Set up automated deployment with GitHub Actions
+
+---
+
+## 🟣 Backend-only deployment on Render (Worker)
+
+Use this if you want the agent to run 24/7 as a background job without an HTTP server.
+
+1) Ensure `render.yaml` exists at the repo root (created by this setup):
+
+```
+services:
+   - type: worker
+      name: pair-agent-backend
+      env: node
+      plan: starter
+      autoDeploy: true
+      buildCommand: npm ci && npm run build
+      startCommand: npm start
+      envVars:
+         - key: DATABASE_URL
+            sync: false
+         - key: NODE_ENV
+            value: production
+```
+
+2) Push to GitHub and deploy via Render Blueprints:
+- Render Dashboard → New → Blueprint → Select your repo
+- On first deploy, add env var `DATABASE_URL` with your Neon connection string
+
+3) Alternatively, create a Background Worker manually:
+- New → Background Worker → From Repo → Select this repo
+- Build Command: `npm ci && npm run build`
+- Start Command: `npm start`
+- Env Vars: `DATABASE_URL`, `NODE_ENV=production`
+
+4) Verify logs: Render → Services → pair-agent-backend → Logs
