@@ -2,6 +2,10 @@
 
 import axios from 'axios';
 
+// Optional Binance API key support (higher limits). Do not log this value.
+const BINANCE_API_KEY = process.env.BINANCE_API_KEY;
+const binanceHeaders = BINANCE_API_KEY ? { 'X-MBX-APIKEY': BINANCE_API_KEY } : undefined;
+
 /**
  * Interface for Binance kline (candlestick) data
  */
@@ -52,6 +56,7 @@ async function fetchKlines(
         limit,
       },
       timeout: 10000,
+      headers: binanceHeaders,
     });
 
     const klines: BinanceKline[] = response.data.map((k: any[]) => ({
@@ -164,7 +169,7 @@ export async function fetchCurrentPrice(symbol: string): Promise<number> {
   try {
     const response = await axios.get<BinanceTickerPrice>(
       `https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`,
-      { timeout: 10000 }
+      { timeout: 10000, headers: binanceHeaders }
     );
     return parseFloat(response.data.price);
   } catch (error) {
@@ -183,7 +188,7 @@ export async function fetchMultiplePrices(symbols: string[]): Promise<Record<str
     const symbolsParam = JSON.stringify(symbols);
     const response = await axios.get<BinanceTickerPrice[]>(
       `https://api.binance.com/api/v3/ticker/price?symbols=${symbolsParam}`,
-      { timeout: 10000 }
+      { timeout: 10000, headers: binanceHeaders }
     );
     
     const priceMap: Record<string, number> = {};

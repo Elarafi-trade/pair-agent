@@ -2,6 +2,10 @@
 
 import axios from 'axios';
 
+// Optional Binance API key support (higher limits). Do not log this value.
+const BINANCE_API_KEY = process.env.BINANCE_API_KEY;
+const binanceHeaders = BINANCE_API_KEY ? { 'X-MBX-APIKEY': BINANCE_API_KEY } : undefined;
+
 /**
  * Interface for Binance exchange info symbol
  */
@@ -20,6 +24,7 @@ async function fetchAvailableUSDCPairs(): Promise<string[]> {
   try {
     const response = await axios.get('https://api.binance.com/api/v3/exchangeInfo', {
       timeout: 10000,
+      headers: binanceHeaders,
     });
 
     const symbols: BinanceSymbol[] = response.data.symbols;
