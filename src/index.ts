@@ -155,7 +155,7 @@ async function runAnalysisCycle(config: Config): Promise<void> {
       
       for (const symbol of symbolsToFetch) {
         try {
-          const marketIndex = getMarketIndex(symbol);
+          const marketIndex = await getMarketIndex(symbol);
           if (marketIndex !== undefined) {
             const price = await fetchCurrentPrice(marketIndex, symbol);
             latestPriceMap[symbol] = price;
@@ -183,8 +183,8 @@ async function runAnalysisCycle(config: Config): Promise<void> {
     // Helper to get current z-score for a pair
     const getCurrentZScore = async (symbolA: string, symbolB: string): Promise<number | null> => {
       try {
-        const indexA = getMarketIndex(symbolA);
-        const indexB = getMarketIndex(symbolB);
+        const indexA = await getMarketIndex(symbolA);
+        const indexB = await getMarketIndex(symbolB);
         
         if (indexA === undefined || indexB === undefined) {
           console.warn(`[EXIT_CHECK] Cannot find market indices for ${symbolA}/${symbolB}`);
