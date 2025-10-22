@@ -2,6 +2,7 @@
 
 import axios from 'axios';
 import { schedule } from './rate_limiter.js';
+import { getMarketPrice as getCachedMarketPrice } from './market_cache.js';
 
 // DLOB server (for orderbook/oracle snapshots) and Data API (for historical TWAPs)
 const DRIFT_DLOB_BASE = process.env.DRIFT_BASE_URL || 'https://dlob.drift.trade';
@@ -100,9 +101,19 @@ async function fetchOracleTwapSeries(
       const err: any = new Error(
         `Failed to fetch TWAP series for ${marketName}: ${error.message}${status ? ` (status ${status})` : ''}`
       );
-      // Propagate client errors as non-retriable EXCEPT 429 (rate limit)
-      const is4xx = !!status && status >= 400 && status < 500;
-      err.isClientError = is4xx && status !== 429;
+      // Attach HTTP status for callers to make decisions
+      err.status = status;
+
+      // Treat 403 (forbidden) as "no TWAP data available" rather than a generic client error
+      if (status === 403) {
+        err.isNoData = true;
+        err.isClientError = false;
+      } else {
+        // Propagate client errors as non-retriable EXCEPT 429 (rate limit)
+        const is4xx = !!status && status >= 400 && status < 500;
+        err.isClientError = is4xx && status !== 429;
+      }
+
       err.isRateLimited = status === 429;
       throw err;
     }
@@ -162,7 +173,16 @@ export async function fetchPairData(
       },
     };
   } catch (error) {
-    console.error(`Error fetching pair data (${symbolA}/${symbolB}):`, error);
+    // Downgrade expected 4xx/no-data issues to a concise warning to avoid noisy stack traces
+    const isNoData = (error && (error as any).isNoData) === true;
+    const isClientError = (error && (error as any).isClientError) === true;
+    if (isNoData || isClientError) {
+      console.warn(`[FETCHER] Skipping pair ${symbolA}/${symbolB}: ${
+        (error as any)?.message ?? 'client/no-data error'
+      }`);
+    } else {
+      console.error(`Error fetching pair data (${symbolA}/${symbolB}):`, error);
+    }
     throw error;
   }
 }
@@ -225,12 +245,57 @@ export async function fetchCurrentPrice(marketIndex: number, symbol?: string): P
       if (prices.length > 0 && prices[0] > 0) {
         return prices[0];
       }
+
+      // Secondary fallback: try market_cache's currentPrice if available (may use cached markets)
+      try {
+        const cached = await getCachedMarketPrice(symbol);
+        if (typeof cached === 'number' && Number.isFinite(cached) && cached > 0) {
+          console.log(`[FETCHER] Using cached market price for ${symbol}: ${cached}`);
+          return cached;
+        }
+      } catch {}
     }
 
     throw new Error('Oracle price unavailable and Data API fallback failed');
   } catch (error) {
     console.error(`[FETCHER] Failed to fetch current price for market ${marketIndex} (${symbol ?? 'unknown'}):`, error);
     throw new Error(`Could not fetch price for market ${marketIndex}`);
+  }
+}
+
+/**
+ * Fetch current oracle price by market symbol when index is unavailable.
+ * Attempts DLOB /l2?marketName=symbol, then TWAP, then cached market price.
+ */
+export async function fetchCurrentPriceBySymbol(symbol: string): Promise<number> {
+  try {
+    // Try DLOB by marketName
+    const l2 = await schedule(() => axios.get(`${DRIFT_DLOB_BASE}/l2`, {
+      params: { marketName: symbol, includeOracle: true, depth: 1 },
+      timeout: 8000,
+    }).then(r => r.data).catch(() => null));
+
+    const oracleFromL2 = l2?.oracle ?? l2?.oracleData?.price;
+    if (typeof oracleFromL2 === 'number' && Number.isFinite(oracleFromL2) && oracleFromL2 > 0) {
+      return oracleFromL2;
+    }
+
+    // Fallback to Data API TWAP
+    const { prices } = await fetchOracleTwapSeries(symbol, 1);
+    if (prices.length > 0 && prices[0] > 0) {
+      return prices[0];
+    }
+
+    // Fallback to cached market price
+    const cached = await getCachedMarketPrice(symbol);
+    if (typeof cached === 'number' && Number.isFinite(cached) && cached > 0) {
+      return cached;
+    }
+
+    throw new Error('All fallbacks failed');
+  } catch (error) {
+    console.error(`[FETCHER] Failed to fetch current price by symbol ${symbol}:`, error);
+    throw new Error(`Could not fetch price for ${symbol}`);
   }
 }
 

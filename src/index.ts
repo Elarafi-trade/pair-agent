@@ -2,13 +2,13 @@
 
 import 'dotenv/config';
 import { readFile } from 'fs/promises';
-import { fetchPairData, withRetry, fetchCurrentPrice } from './fetcher.js';
+import { fetchPairData, withRetry, fetchCurrentPrice, fetchCurrentPriceBySymbol } from './fetcher.js';
 import { analyzePair, meetsTradeSignalCriteria } from './pair_analysis.js';
 import { formatAnalysisReport } from './narrative.js';
-import { 
-  executeTrade, 
-  saveTradeHistory, 
-  getTradeSummary, 
+import {
+  executeTrade,
+  saveTradeHistory,
+  getTradeSummary,
   updateUPnLForOpenTrades,
   checkExitConditions,
   getOpenTrades,
@@ -17,10 +17,11 @@ import {
   getTradeHistory
 } from './executor.js';
 import { generateRandomPairCombinations, getMarketIndex } from './pair_selector.js';
-import { 
-  calculatePerformanceMetrics, 
+import { buildSymbolToIndexMap } from './market_cache.js';
+import {
+  calculatePerformanceMetrics,
   formatPerformanceReport,
-  savePerformanceMetrics 
+  savePerformanceMetrics
 } from './performance.js';
 
 /**
@@ -41,6 +42,7 @@ interface Config {
     lookbackPeriod: number;
     updateInterval: number;
     exitCheckInterval?: number; // 🆕 Separate interval for exit monitoring (default: 5 minutes)
+    maxScansPerCycle?: number;   // 🆕 Cap on scan iterations per cycle to avoid infinite loops
     zScoreThreshold: number;
     correlationThreshold: number;
     randomPairCount?: number;
@@ -91,7 +93,7 @@ async function analyzeSinglePair(
   config: Config
 ): Promise<boolean> {
   console.log(`\n[${new Date().toISOString()}] Analyzing ${symbolA}/${symbolB}...`);
-  
+
   try {
     // Fetch data with retry
     const { dataA, dataB } = await withRetry(
@@ -99,58 +101,68 @@ async function analyzeSinglePair(
       3,
       1000
     );
-    
+
     console.log(`[DATA] Fetched ${dataA.prices.length} data points for each pair`);
-    
+
     // Analyze pair
     const result = analyzePair(dataA.prices, dataB.prices);
-    
+
     // Display formatted report
     console.log(formatAnalysisReport(symbolA, symbolB, result, { timeframe: '1h' }));
-    
+
     // Check if meets trade criteria
     const shouldTrade = meetsTradeSignalCriteria(
       result,
       config.analysis.zScoreThreshold,
       config.analysis.correlationThreshold
     );
-    
+
     if (shouldTrade) {
       console.log(`[SIGNAL] ⚡ Trade signal detected!`);
-      
+
       // Check risk management limits before executing
       const openTrades = getOpenTrades();
       const maxTrades = config.riskManagement?.maxConcurrentTrades ?? 5;
-      
+
       if (openTrades.length >= maxTrades) {
         console.log(`[RISK] ⚠️ Max concurrent trades reached (${openTrades.length}/${maxTrades}). Skipping trade.`);
         return false;
       }
-      
+
       // Check if we already have a correlated trade open
       const maxCorrelated = config.riskManagement?.maxCorrelatedTrades ?? 2;
       const correlatedCount = openTrades.filter(t =>
         t.symbolA === symbolA || t.symbolB === symbolB ||
         t.symbolA === symbolB || t.symbolB === symbolA
       ).length;
-      
+
       if (correlatedCount >= maxCorrelated) {
         console.log(`[RISK] ⚠️ Too many correlated trades (${correlatedCount}/${maxCorrelated}). Skipping ${symbolA}/${symbolB}.`);
         return false;
       }
-      
+
       // Execute simulated trade
       const currentPriceA = dataA.prices[dataA.prices.length - 1];
       const currentPriceB = dataB.prices[dataB.prices.length - 1];
-      
+
       await executeTrade(symbolA, symbolB, result, currentPriceA, currentPriceB);
       return true; // Signal found
     } else {
       console.log(`[SIGNAL] No actionable trade signal for this pair`);
       return false; // No signal
     }
-    
-  } catch (error) {
+
+  } catch (error: any) {
+    // If this is a client/no-data error from the Data API (e.g., 403 forbidden, no TWAP),
+    // treat it as a soft skip rather than a hard failure.
+    const clientErr = error && (error as any).isClientError === true;
+    const noDataErr = error && (error as any).isNoData === true;
+
+    if (clientErr || noDataErr) {
+      console.warn(`[SKIP] Skipping pair ${symbolA}/${symbolB} due to missing TWAP or client error: ${error.message}`);
+      return false;
+    }
+
     console.error(`[ERROR] Failed to analyze ${symbolA}/${symbolB}:`, error);
     return false; // Error = no signal
   }
@@ -162,21 +174,21 @@ async function analyzeSinglePair(
  */
 async function performQuickExitCheck(config: Config): Promise<number> {
   const openTrades = getOpenTrades();
-  
+
   if (openTrades.length === 0) {
     return 0;
   }
-  
+
   const initialCount = openTrades.length;
   console.log(`\n[EXIT_MONITOR] 🔍 Quick check: ${openTrades.length} open position(s) at ${new Date().toLocaleTimeString()}`);
-  
+
   // Build list of unique symbols in open trades
   const symbolsToFetch = new Set<string>();
   openTrades.forEach(t => {
     symbolsToFetch.add(t.symbolA);
     symbolsToFetch.add(t.symbolB);
   });
-  
+
   // Fetch current prices for all symbols
   let latestPriceMap: Record<string, number> = {};
   try {
@@ -198,23 +210,23 @@ async function performQuickExitCheck(config: Config): Promise<number> {
     console.error(`[EXIT_MONITOR] Price fetch error:`, error);
     return 0;
   }
-  
+
   // Helper to get current z-score for a pair
   const getCurrentZScore = async (symbolA: string, symbolB: string): Promise<number | null> => {
     try {
       const indexA = await getMarketIndex(symbolA);
       const indexB = await getMarketIndex(symbolB);
-      
+
       if (indexA === undefined || indexB === undefined) {
         return null;
       }
-      
+
       const { dataA, dataB } = await withRetry(
         () => fetchPairData(indexA, indexB, symbolA, symbolB, 100),
         2,
         1000
       );
-      
+
       const analysis = analyzePair(dataA.prices, dataB.prices);
       return analysis.zScore;
     } catch (error: any) {
@@ -222,7 +234,7 @@ async function performQuickExitCheck(config: Config): Promise<number> {
       return null;
     }
   };
-  
+
   await checkExitConditions(
     (symbol) => latestPriceMap[symbol] ?? 0,
     getCurrentZScore,
@@ -233,16 +245,16 @@ async function performQuickExitCheck(config: Config): Promise<number> {
       maxHoldingPeriodMs: config.exitConditions.maxHoldingPeriodDays * 24 * 60 * 60 * 1000,
     } : DEFAULT_EXIT_CONDITIONS
   );
-  
+
   const remainingTrades = getOpenTrades();
   const closedCount = initialCount - remainingTrades.length;
-  
+
   if (closedCount > 0) {
     console.log(`[EXIT_MONITOR] ⚠️ CLOSED ${closedCount} position(s)! ${remainingTrades.length} remain.`);
   } else {
     console.log(`[EXIT_MONITOR] ✅ All positions within limits. ${remainingTrades.length} still open.`);
   }
-  
+
   return closedCount;
 }
 
@@ -254,12 +266,12 @@ async function runAnalysisCycle(config: Config): Promise<void> {
   console.log(`  ${config.agent.name} - Analysis Cycle`);
   console.log(`  ${new Date().toLocaleString()}`);
   console.log(`${'='.repeat(60)}\n`);
-  
+
   // First, check exit conditions for all open trades
   const openTrades = getOpenTrades();
   if (openTrades.length > 0) {
     console.log(`[EXIT_CHECK] Found ${openTrades.length} open trade(s) to check...\n`);
-    
+
     // Build list of unique symbols in open trades
     // NOTE: We need to fetch market info to get indices - for now use oracle endpoint per symbol
     const symbolsToFetch = new Set<string>();
@@ -267,15 +279,21 @@ async function runAnalysisCycle(config: Config): Promise<void> {
       symbolsToFetch.add(t.symbolA);
       symbolsToFetch.add(t.symbolB);
     });
-    
+
+    // Build a symbol->index map once to avoid repeated market cache fetches
+    let symbolToIndex: Record<string, number> = {};
+    try {
+      symbolToIndex = await buildSymbolToIndexMap();
+    } catch {}
+
     // Fetch current prices for all symbols using market index mapping
     let latestPriceMap: Record<string, number> = {};
     try {
       console.log(`[EXIT_CHECK] Fetching prices for ${symbolsToFetch.size} symbols...`);
-      
+
       for (const symbol of symbolsToFetch) {
         try {
-          const marketIndex = await getMarketIndex(symbol);
+          const marketIndex = symbolToIndex[symbol] ?? await getMarketIndex(symbol);
           if (marketIndex !== undefined) {
             const price = await fetchCurrentPrice(marketIndex, symbol);
             latestPriceMap[symbol] = price;
@@ -289,7 +307,7 @@ async function runAnalysisCycle(config: Config): Promise<void> {
           latestPriceMap[symbol] = 0;
         }
       }
-      
+
       const fetchedCount = Object.values(latestPriceMap).filter(p => p > 0).length;
       console.log(`[EXIT_CHECK] Successfully fetched ${fetchedCount}/${symbolsToFetch.size} prices`);
     } catch (error) {
@@ -299,25 +317,25 @@ async function runAnalysisCycle(config: Config): Promise<void> {
         latestPriceMap[symbol] = 0;
       });
     }
-    
+
     // Helper to get current z-score for a pair
     const getCurrentZScore = async (symbolA: string, symbolB: string): Promise<number | null> => {
       try {
-        const indexA = await getMarketIndex(symbolA);
-        const indexB = await getMarketIndex(symbolB);
-        
+        const indexA = symbolToIndex[symbolA] ?? await getMarketIndex(symbolA);
+        const indexB = symbolToIndex[symbolB] ?? await getMarketIndex(symbolB);
+
         if (indexA === undefined || indexB === undefined) {
           console.warn(`[EXIT_CHECK] Cannot find market indices for ${symbolA}/${symbolB}`);
           return null;
         }
-        
+
         // Fetch recent data and compute current z-score
         const { dataA, dataB } = await withRetry(
           () => fetchPairData(indexA, indexB, symbolA, symbolB, 100),
           2,
           1000
         );
-        
+
         const analysis = analyzePair(dataA.prices, dataB.prices);
         return analysis.zScore;
       } catch (error: any) {
@@ -325,7 +343,7 @@ async function runAnalysisCycle(config: Config): Promise<void> {
         return null;
       }
     };
-    
+
     await checkExitConditions(
       (symbol) => latestPriceMap[symbol] ?? 0,
       getCurrentZScore,
@@ -336,26 +354,27 @@ async function runAnalysisCycle(config: Config): Promise<void> {
         maxHoldingPeriodMs: config.exitConditions.maxHoldingPeriodDays * 24 * 60 * 60 * 1000,
       } : DEFAULT_EXIT_CONDITIONS
     );
-    
+
     // Show remaining open trades after exit check
     const remainingOpenTrades = getOpenTrades();
     console.log(`\n[EXIT_CHECK] Complete. ${remainingOpenTrades.length} position(s) remain open\n`);
   }
-  
+
   let signalFound = false;
   let scanCount = 0;
-  
+  const maxScans = config.analysis.maxScansPerCycle ?? 20;
+
   // Keep scanning until a trade signal is found
   while (!signalFound) {
     scanCount++;
-    
+
     // Generate random pairs from Drift Protocol
     console.log(`[PAIR_SELECTOR] Scan #${scanCount} - Generating random trading pairs...`);
     const pairCount = config.analysis.randomPairCount ?? 3;
     const randomPairs = await generateRandomPairCombinations(pairCount);
-    
+
     console.log(`[PAIR_SELECTOR] Selected ${randomPairs.length} random pairs for this scan\n`);
-    
+
     // Analyze each pair sequentially
     for (const pair of randomPairs) {
       const hasSignal = await analyzeSinglePair(
@@ -371,57 +390,72 @@ async function runAnalysisCycle(config: Config): Promise<void> {
         break; // Exit the for loop
       }
     }
-    
+
     if (!signalFound) {
+      // Reached cap? end this cycle to avoid infinite scanning
+      if (scanCount >= maxScans) {
+        console.log(`\n[SCAN] Reached max scans per cycle (${maxScans}). Ending cycle without a trade.`);
+        break;
+      }
       console.log(`\n[SCAN] No signals found in scan #${scanCount}. Generating new random pairs...\n`);
       // Small delay to avoid hammering the API
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
   }
 
-  // Update UPnL for all open trades using latest prices from the last analyzed pairs
+  // Update UPnL for all open trades using freshest prices for open-trade symbols
   console.log('\n[UPDATE] Refreshing UPnL for open trades...');
   const latestPriceMap: Record<string, number> = {};
-  const pairCount = config.analysis.randomPairCount ?? 3;
-  const randomPairs = await generateRandomPairCombinations(pairCount);
-  for (const pair of randomPairs) {
+  const openForUpdate = getOpenTrades();
+
+  if (openForUpdate.length > 0) {
+    // Build symbol set from open trades
+    const symbols = new Set<string>();
+    openForUpdate.forEach(t => { symbols.add(t.symbolA); symbols.add(t.symbolB); });
+
+    // Try to prebuild symbol->index map once
+    let symbolToIndex: Record<string, number> = {};
     try {
-      const { dataA, dataB } = await withRetry(
-        () => fetchPairData(
-          pair.marketIndexA,
-          pair.marketIndexB,
-          pair.symbolA,
-          pair.symbolB,
-          config.analysis.lookbackPeriod
-        ),
-        3,
-        1000
-      );
-      latestPriceMap[pair.symbolA] = dataA.prices[dataA.prices.length - 1];
-      latestPriceMap[pair.symbolB] = dataB.prices[dataB.prices.length - 1];
-    } catch (error) {
-      // Skip on error
+      symbolToIndex = await buildSymbolToIndexMap();
+    } catch {}
+
+    for (const symbol of symbols) {
+      try {
+        const marketIndex = symbolToIndex[symbol] ?? await getMarketIndex(symbol);
+        if (marketIndex !== undefined) {
+          const price = await fetchCurrentPrice(marketIndex, symbol);
+          latestPriceMap[symbol] = price;
+        } else {
+          // Fallback: try fetching by symbol directly (does not require market index)
+          const price = await fetchCurrentPriceBySymbol(symbol);
+          latestPriceMap[symbol] = price ?? 0;
+        }
+      } catch (err: any) {
+        console.warn(`[UPDATE] Failed to fetch current price for ${symbol}: ${err.message}`);
+        latestPriceMap[symbol] = 0;
+      }
     }
   }
+
   await updateUPnLForOpenTrades((symbol) => latestPriceMap[symbol] ?? 0);
 
   // Display trade summary
   const summary = getTradeSummary();
   const currentOpenTrades = getOpenTrades();
-  
+
   console.log(`\n[SUMMARY] Trades executed: ${summary.totalTrades} (${summary.longTrades} long, ${summary.shortTrades} short)`);
   console.log(`[SUMMARY] Open trades: ${currentOpenTrades.length}`);
-  
+
   // Display details of open trades
   if (currentOpenTrades.length > 0) {
     console.log(`\n${'─'.repeat(60)}`);
     console.log(`  OPEN POSITIONS`);
     console.log(`${'─'.repeat(60)}`);
-    
+
     currentOpenTrades.forEach((trade, index) => {
       const duration = ((Date.now() - trade.timestamp) / 1000 / 60).toFixed(0);
       const pnlColor = (trade.upnlPct ?? 0) >= 0 ? '+' : '';
-      
+
       console.log(`
   [${index + 1}] ${trade.pair}
     Action:     ${trade.action.toUpperCase()}
@@ -431,7 +465,7 @@ async function runAnalysisCycle(config: Config): Promise<void> {
     Z-Score:    ${trade.zScore.toFixed(2)}
     Corr:       ${trade.correlation.toFixed(2)}`);
     });
-    
+
     console.log(`${'─'.repeat(60)}\n`);
   }
 
@@ -441,7 +475,7 @@ async function runAnalysisCycle(config: Config): Promise<void> {
   // Calculate and display performance metrics
   const allTrades = getTradeHistory();
   const performanceMetrics = calculatePerformanceMetrics(allTrades);
-  
+
   if (performanceMetrics.totalTrades > 0) {
     console.log(formatPerformanceReport(performanceMetrics));
     await savePerformanceMetrics(performanceMetrics);
@@ -465,7 +499,7 @@ async function main(): Promise<void> {
 ║                                                           ║
 ╚═══════════════════════════════════════════════════════════╝
 `);
-  
+
   try {
     // Load configuration
     const config = await loadConfig();
@@ -475,7 +509,7 @@ async function main(): Promise<void> {
     console.log(`[CONFIG] Update interval: ${config.analysis.updateInterval / 60000} minutes`);
     console.log(`[CONFIG] Z-score threshold: ±${config.analysis.zScoreThreshold}`);
     console.log(`[CONFIG] Correlation threshold: ${config.analysis.correlationThreshold}`);
-    
+
     if (config.exitConditions) {
       console.log(`[CONFIG] Exit conditions:`);
       console.log(`  - Mean reversion: |z-score| < ${config.exitConditions.meanReversionThreshold}`);
@@ -483,11 +517,11 @@ async function main(): Promise<void> {
       console.log(`  - Take profit: ${config.exitConditions.takeProfitPct}%`);
       console.log(`  - Max holding: ${config.exitConditions.maxHoldingPeriodDays} days`);
     }
-    
+
     // Load existing trade history
     console.log('');
     await loadTradeHistory();
-    
+
     // Display performance metrics at startup
     const allTradesAtStartup = getTradeHistory();
     if (allTradesAtStartup.length > 0) {
@@ -496,18 +530,18 @@ async function main(): Promise<void> {
         console.log(formatPerformanceReport(startupMetrics));
       }
     }
-    
+
     // Display open trades at startup
     const startupOpenTrades = getOpenTrades();
     if (startupOpenTrades.length > 0) {
       console.log(`\n${'═'.repeat(60)}`);
       console.log(`  📊 EXISTING OPEN POSITIONS`);
       console.log(`${'═'.repeat(60)}`);
-      
+
       startupOpenTrades.forEach((trade, index) => {
         const duration = ((Date.now() - trade.timestamp) / 1000 / 60 / 60).toFixed(1);
         const pnlColor = (trade.upnlPct ?? 0) >= 0 ? '+' : '';
-        
+
         console.log(`
   [${index + 1}] ${trade.pair}
     Action:     ${trade.action.toUpperCase()}
@@ -517,22 +551,10 @@ async function main(): Promise<void> {
     Z-Score:    ${trade.zScore.toFixed(2)}
     Corr:       ${trade.correlation.toFixed(2)}`);
       });
-      
+
       console.log(`${'═'.repeat(60)}\n`);
     }
-    
-    // Run first cycle immediately
-    await runAnalysisCycle(config);
-    
-    // Schedule main analysis cycle (hourly by default)
-    setInterval(async () => {
-      try {
-        await runAnalysisCycle(config);
-      } catch (error) {
-        console.error('[ERROR] Analysis cycle failed:', error);
-      }
-    }, config.analysis.updateInterval);
-    
+
     // 🔥 NEW: Schedule frequent exit monitoring (every 5 minutes by default)
     // This runs independently to catch stop-losses quickly
     const EXIT_CHECK_INTERVAL = config.analysis.exitCheckInterval ?? (5 * 60 * 1000); // Default: 5 minutes
@@ -546,12 +568,26 @@ async function main(): Promise<void> {
         console.error('[ERROR] Exit monitoring failed:', error);
       }
     }, EXIT_CHECK_INTERVAL);
-    
+
+    // Run first cycle immediately
+    await runAnalysisCycle(config);
+
+    // Schedule main analysis cycle (hourly by default)
+    setInterval(async () => {
+      try {
+        await runAnalysisCycle(config);
+      } catch (error) {
+        console.error('[ERROR] Analysis cycle failed:', error);
+      }
+    }, config.analysis.updateInterval);
+
+
+
     console.log(`[AGENT] Running continuously with:`);
     console.log(`  - Main analysis cycle: Every ${config.analysis.updateInterval / 60000} minutes`);
     console.log(`  - Exit monitoring: Every ${EXIT_CHECK_INTERVAL / 60000} minutes`);
     console.log(`  Press Ctrl+C to stop.\n`);
-    
+
   } catch (error) {
     console.error('[FATAL] Agent startup failed:', error);
     process.exit(1);

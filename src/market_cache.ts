@@ -33,6 +33,13 @@ let cachedMarkets: DriftMarketInfo[] | null = null;
 let lastCacheTime: number = 0;
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
+// Track recent fetch failures to avoid noisy repeated attempts/logs when the API is unavailable
+let lastFetchErrorAt: number = 0;
+let lastFetchErrorStatus: number | undefined = undefined;
+const FAILURE_COOLDOWN_MS = 60 * 1000; // 1 minute backoff if previous fetch failed and no cache
+let recent403Count = 0;
+let first403At: number | null = null;
+
 /**
  * Fetch all available markets from Drift Data API
  * Results are cached for 1 hour to minimize API calls
@@ -46,6 +53,14 @@ export async function fetchAllMarkets(forceRefresh: boolean = false): Promise<Dr
   if (!forceRefresh && cachedMarkets && (now - lastCacheTime) < CACHE_TTL_MS) {
     console.log(`[MARKET_CACHE] Using cached markets (${cachedMarkets.length} markets, age: ${Math.round((now - lastCacheTime) / 1000)}s)`);
     return cachedMarkets;
+  }
+  
+  // If we recently failed and have no cache yet, avoid hammering the API for a short cooldown
+  if (!cachedMarkets && lastFetchErrorAt && (now - lastFetchErrorAt) < FAILURE_COOLDOWN_MS) {
+    if (lastFetchErrorStatus === 403) {
+      console.warn(`[MARKET_CACHE] Drift Data API 403 persists (cooldown ${(FAILURE_COOLDOWN_MS - (now - lastFetchErrorAt))}ms). Using empty market list.`);
+    }
+    return [];
   }
   
   try {
@@ -67,21 +82,47 @@ export async function fetchAllMarkets(forceRefresh: boolean = false): Promise<Dr
     // Update cache
     cachedMarkets = perpMarkets;
     lastCacheTime = now;
+    lastFetchErrorAt = 0;
+    lastFetchErrorStatus = undefined;
+    recent403Count = 0;
+    first403At = null;
     
     console.log(`[MARKET_CACHE] Cached ${perpMarkets.length} perpetual markets`);
     console.log(`[MARKET_CACHE] Cache expires in ${Math.round(CACHE_TTL_MS / 1000 / 60)} minutes`);
     
     return perpMarkets;
   } catch (error: any) {
-    console.error(`[MARKET_CACHE] Failed to fetch markets:`, error.message);
+    const status = error?.response?.status;
+    lastFetchErrorAt = now;
+    lastFetchErrorStatus = status;
+
+    // Aggregate and downgrade 403 noise
+    if (status === 403) {
+      recent403Count += 1;
+      if (!first403At) first403At = now;
+      const windowMs = now - (first403At ?? now);
+      // Emit a concise aggregated warning roughly every 10 occurrences or 1 minute
+      const shouldLog = recent403Count === 1 || recent403Count % 10 === 0 || windowMs > 60_000;
+      if (shouldLog) {
+        console.warn(`[MARKET_CACHE] Drift Data API returned 403 (forbidden) ${recent403Count} time(s) in the last ${Math.round(windowMs / 1000)}s. Will use stale/empty cache and retry later.`);
+        // Reset window timer but keep cumulative count rolling per minute
+        if (windowMs > 60_000) {
+          first403At = now;
+          recent403Count = 1; // count current
+        }
+      }
+    } else {
+      console.error(`[MARKET_CACHE] Failed to fetch markets:`, error.message);
+    }
     
     // Return stale cache if available
     if (cachedMarkets) {
       console.log(`[MARKET_CACHE] Using stale cache (${cachedMarkets.length} markets)`);
       return cachedMarkets;
     }
-    
-    throw new Error(`Could not fetch markets from Drift API: ${error.message}`);
+
+    // No cache yet: return empty list instead of throwing, so upstream can degrade gracefully
+    return [];
   }
 }
 
