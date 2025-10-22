@@ -205,7 +205,7 @@ export async function withRetry<T>(
  * @param marketIndex - Market index (e.g., 0 for SOL-PERP)
  * @returns Current oracle price
  */
-export async function fetchCurrentPrice(marketIndex: number): Promise<number> {
+export async function fetchCurrentPrice(marketIndex: number, symbol?: string): Promise<number> {
   try {
     // Prefer DLOB L2 snapshot with oracle field; fallback to Data API TWAP
     const l2 = await schedule(() => axios.get(`${DRIFT_DLOB_BASE}/l2`, {
@@ -218,10 +218,18 @@ export async function fetchCurrentPrice(marketIndex: number): Promise<number> {
       return oracleFromL2;
     }
 
-    // Fallback requires symbol; without symbol mapping we cannot query by name here
-    throw new Error('Oracle price unavailable (missing symbol mapping for Data API fallback)');
+    // Fallback to Data API fundingRates if symbol is provided
+    if (symbol) {
+      console.log(`[FETCHER] Oracle unavailable for ${symbol}, falling back to Data API...`);
+      const { prices } = await fetchOracleTwapSeries(symbol, 1);
+      if (prices.length > 0 && prices[0] > 0) {
+        return prices[0];
+      }
+    }
+
+    throw new Error('Oracle price unavailable and Data API fallback failed');
   } catch (error) {
-    console.error(`[FETCHER] Failed to fetch current price for market ${marketIndex}:`, error);
+    console.error(`[FETCHER] Failed to fetch current price for market ${marketIndex} (${symbol ?? 'unknown'}):`, error);
     throw new Error(`Could not fetch price for market ${marketIndex}`);
   }
 }

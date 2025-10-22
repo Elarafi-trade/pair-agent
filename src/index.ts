@@ -2,7 +2,7 @@
 
 import 'dotenv/config';
 import { readFile } from 'fs/promises';
-import { fetchPairData, withRetry } from './fetcher.js';
+import { fetchPairData, withRetry, fetchCurrentPrice } from './fetcher.js';
 import { analyzePair, meetsTradeSignalCriteria } from './pair_analysis.js';
 import { formatAnalysisReport } from './narrative.js';
 import { 
@@ -16,7 +16,7 @@ import {
   loadTradeHistory,
   getTradeHistory
 } from './executor.js';
-import { generateRandomPairCombinations } from './pair_selector.js';
+import { generateRandomPairCombinations, getMarketIndex } from './pair_selector.js';
 import { 
   calculatePerformanceMetrics, 
   formatPerformanceReport,
@@ -148,25 +148,30 @@ async function runAnalysisCycle(config: Config): Promise<void> {
       symbolsToFetch.add(t.symbolB);
     });
     
-    // Fetch current prices for all symbols
-    // Since we don't have market index mapping yet, we'll fetch prices individually
+    // Fetch current prices for all symbols using market index mapping
     let latestPriceMap: Record<string, number> = {};
     try {
       console.log(`[EXIT_CHECK] Fetching prices for ${symbolsToFetch.size} symbols...`);
       
-      // TODO: Implement market index lookup/mapping to use batch fetching
-      // For now, fetch prices one by one using Drift oracle endpoint
       for (const symbol of symbolsToFetch) {
         try {
-          // This is a workaround - we need market indices
-          // Skip price fetching for exit check temporarily
-          latestPriceMap[symbol] = 0;
-        } catch (err) {
+          const marketIndex = getMarketIndex(symbol);
+          if (marketIndex !== undefined) {
+            const price = await fetchCurrentPrice(marketIndex, symbol);
+            latestPriceMap[symbol] = price;
+            console.log(`[EXIT_CHECK] ${symbol}: $${price.toFixed(2)}`);
+          } else {
+            console.warn(`[EXIT_CHECK] Unknown market index for ${symbol} - skipping`);
+            latestPriceMap[symbol] = 0;
+          }
+        } catch (err: any) {
+          console.error(`[EXIT_CHECK] Failed to fetch price for ${symbol}: ${err.message}`);
           latestPriceMap[symbol] = 0;
         }
       }
       
-      console.log(`[EXIT_CHECK] Price fetching skipped - needs market index mapping`);
+      const fetchedCount = Object.values(latestPriceMap).filter(p => p > 0).length;
+      console.log(`[EXIT_CHECK] Successfully fetched ${fetchedCount}/${symbolsToFetch.size} prices`);
     } catch (error) {
       console.error(`[ERROR] Failed to fetch current prices for exit check:`, error);
       // Set all prices to 0 as fallback
@@ -176,14 +181,27 @@ async function runAnalysisCycle(config: Config): Promise<void> {
     }
     
     // Helper to get current z-score for a pair
-    // NOTE: This also needs market index lookup - temporarily disabled
     const getCurrentZScore = async (symbolA: string, symbolB: string): Promise<number | null> => {
       try {
-        // TODO: Implement symbol-to-market-index mapping
-        // For now, return null to skip z-score-based exits
-        console.warn(`[EXIT_CHECK] Z-score calculation skipped for ${symbolA}/${symbolB} - needs market index mapping`);
-        return null;
-      } catch (error) {
+        const indexA = getMarketIndex(symbolA);
+        const indexB = getMarketIndex(symbolB);
+        
+        if (indexA === undefined || indexB === undefined) {
+          console.warn(`[EXIT_CHECK] Cannot find market indices for ${symbolA}/${symbolB}`);
+          return null;
+        }
+        
+        // Fetch recent data and compute current z-score
+        const { dataA, dataB } = await withRetry(
+          () => fetchPairData(indexA, indexB, symbolA, symbolB, 100),
+          2,
+          1000
+        );
+        
+        const analysis = analyzePair(dataA.prices, dataB.prices);
+        return analysis.zScore;
+      } catch (error: any) {
+        console.error(`[EXIT_CHECK] Failed to calculate z-score for ${symbolA}/${symbolB}: ${error.message}`);
         return null;
       }
     };

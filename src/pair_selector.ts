@@ -83,6 +83,82 @@ async function selectRandomMarkets(count: number = 5): Promise<DriftMarket[]> {
 }
 
 /**
+ * Symbol-to-market-index lookup table
+ */
+const SYMBOL_TO_INDEX: Record<string, number> = {
+  'SOL-PERP': 0,
+  'BTC-PERP': 1,
+  'ETH-PERP': 2,
+  '1MPEPE-PERP': 3,
+  'MATIC-PERP': 4,
+  'ARB-PERP': 5,
+  'DOGE-PERP': 6,
+  'BNB-PERP': 7,
+  'SUI-PERP': 8,
+  'OP-PERP': 9,
+  'APT-PERP': 10,
+  'LDO-PERP': 11,
+  'BLUR-PERP': 12,
+  'XRP-PERP': 13,
+  'JTO-PERP': 14,
+  'SEI-PERP': 15,
+  'PYTH-PERP': 16,
+  'TIA-PERP': 17,
+  'JUP-PERP': 18,
+  'DYM-PERP': 19,
+  'STRK-PERP': 20,
+  'W-PERP': 21,
+  'WIF-PERP': 22,
+  'TNSR-PERP': 23,
+  'AEVO-PERP': 24,
+};
+
+/**
+ * Get market index for a given symbol
+ * @param symbol - Market symbol (e.g., 'SOL-PERP')
+ * @returns Market index or undefined if not found
+ */
+export function getMarketIndex(symbol: string): number | undefined {
+  return SYMBOL_TO_INDEX[symbol];
+}
+
+/**
+ * Get symbol for a given market index (reverse lookup)
+ * @param marketIndex - Market index (e.g., 0 for SOL-PERP)
+ * @returns Market symbol or undefined if not found
+ */
+export function getMarketSymbol(marketIndex: number): string | undefined {
+  const INDEX_TO_SYMBOL: Record<number, string> = {
+    0: 'SOL-PERP',
+    1: 'BTC-PERP',
+    2: 'ETH-PERP',
+    3: '1MPEPE-PERP',
+    4: 'MATIC-PERP',
+    5: 'ARB-PERP',
+    6: 'DOGE-PERP',
+    7: 'BNB-PERP',
+    8: 'SUI-PERP',
+    9: 'OP-PERP',
+    10: 'APT-PERP',
+    11: 'LDO-PERP',
+    12: 'BLUR-PERP',
+    13: 'XRP-PERP',
+    14: 'JTO-PERP',
+    15: 'SEI-PERP',
+    16: 'PYTH-PERP',
+    17: 'TIA-PERP',
+    18: 'JUP-PERP',
+    19: 'INJ-PERP',
+    20: 'RNDR-PERP',
+    21: 'W-PERP',
+    22: 'WIF-PERP',
+    23: 'TNSR-PERP',
+    24: 'AEVO-PERP',
+  };
+  return INDEX_TO_SYMBOL[marketIndex];
+}
+
+/**
  * Generate random market pair combinations for pair trading
  * Picks 2*N random markets and pairs them for correlation analysis
  * @param pairCount - Number of pair combinations to generate
