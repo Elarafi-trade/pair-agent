@@ -6,6 +6,32 @@ import axios from 'axios';
 const BINANCE_API_KEY = process.env.BINANCE_API_KEY;
 const binanceHeaders = BINANCE_API_KEY ? { 'X-MBX-APIKEY': BINANCE_API_KEY } : undefined;
 
+// Allow overriding base URL and add fallbacks to avoid 451 geo restriction
+const ENV_BASE = process.env.BINANCE_BASE_URL;
+const BINANCE_BASE_URLS = ENV_BASE
+  ? [ENV_BASE]
+  : [
+      'https://api.binance.com/api/v3',
+      'https://api.binance.us/api/v3',
+      'https://data-api.binance.vision/api/v3',
+    ];
+
+async function getWithFallback<T = any>(path: string): Promise<T> {
+  let lastError: any;
+  for (const base of BINANCE_BASE_URLS) {
+    try {
+      const res = await axios.get<T>(`${base}${path}`, { timeout: 10000, headers: binanceHeaders });
+      return res.data as T;
+    } catch (err: any) {
+      lastError = err;
+      const status = err?.response?.status;
+      console.warn(`[PAIR_SELECTOR] GET ${path} via ${base} failed${status ? ` (status ${status})` : ''}. Trying next...`);
+      continue;
+    }
+  }
+  throw lastError ?? new Error('All Binance endpoints failed');
+}
+
 /**
  * Interface for Binance exchange info symbol
  */
@@ -22,12 +48,8 @@ interface BinanceSymbol {
  */
 async function fetchAvailableUSDCPairs(): Promise<string[]> {
   try {
-    const response = await axios.get('https://api.binance.com/api/v3/exchangeInfo', {
-      timeout: 10000,
-      headers: binanceHeaders,
-    });
-
-    const symbols: BinanceSymbol[] = response.data.symbols;
+    const data = await getWithFallback<{ symbols: BinanceSymbol[] }>(`/exchangeInfo`);
+    const symbols: BinanceSymbol[] = data.symbols;
 
     // Filter for active USDC pairs only
     const usdcPairs = symbols
