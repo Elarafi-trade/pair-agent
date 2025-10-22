@@ -5,14 +5,34 @@
 export async function updateUPnLForOpenTrades(getLatestPrice: (symbol: string) => number): Promise<void> {
   for (const trade of tradeHistory) {
     if (trade.status === 'open' && trade.longPrice !== undefined && trade.shortPrice !== undefined) {
-      // Get current prices for each leg
-      const currentLong = getLatestPrice(trade.action === 'long' ? trade.symbolA : trade.symbolB);
-      const currentShort = getLatestPrice(trade.action === 'long' ? trade.symbolB : trade.symbolA);
+      // Use explicit longAsset/shortAsset instead of inferring from action
+      if (!trade.longAsset || !trade.shortAsset) {
+        console.warn(`[EXECUTOR] Trade ${trade.id} missing longAsset/shortAsset - skipping UPnL update`);
+        continue;
+      }
+      
+      // Get current prices for each leg using explicit asset names
+      const currentLong = getLatestPrice(trade.longAsset);
+      const currentShort = getLatestPrice(trade.shortAsset);
+      
+      // Validate prices
+      if (currentLong === 0 || currentShort === 0) {
+        console.warn(`[EXECUTOR] Invalid prices for ${trade.pair} (long=${currentLong}, short=${currentShort}) - skipping UPnL update`);
+        continue;
+      }
+      
       // Calculate PnL for each leg
       const longRet = (currentLong - trade.longPrice) / trade.longPrice;
       const shortRet = (trade.shortPrice - currentShort) / trade.shortPrice;
+      
       // Pair trading PnL is longRet + shortRet
       const newUpnl = (longRet + shortRet) * 100;
+      
+      // Validate PnL is reasonable (should typically be < ±50% in pair trading)
+      if (Math.abs(newUpnl) > 100) {
+        console.warn(`[EXECUTOR] Suspicious PnL for ${trade.pair}: ${newUpnl.toFixed(2)}% - check prices: long ${trade.longAsset} ${currentLong.toFixed(4)}, short ${trade.shortAsset} ${currentShort.toFixed(4)}`);
+      }
+      
       trade.upnlPct = newUpnl;
 
       // Update in database
@@ -57,6 +77,8 @@ export interface TradeRecord {
   priceB?: number;
   longPrice?: number;
   shortPrice?: number;
+  longAsset?: string;  // Which asset we're long (e.g., 'SOL-PERP')
+  shortAsset?: string; // Which asset we're short (e.g., 'ETH-PERP')
   upnlPct?: number;
   entryPriceA?: number;
   entryPriceB?: number;
@@ -124,6 +146,8 @@ function dbTradeToLocal(dbTrade: any): TradeRecord {
     priceB: Number(dbTrade.shortPrice),
     longPrice: Number(dbTrade.longPrice),
     shortPrice: Number(dbTrade.shortPrice),
+    longAsset: dbTrade.longAsset,  // Explicit long asset from database
+    shortAsset: dbTrade.shortAsset, // Explicit short asset from database
     upnlPct: dbTrade.upnlPct ? Number(dbTrade.upnlPct) : 0,
     entryPriceA: Number(dbTrade.longPrice),
     entryPriceB: Number(dbTrade.shortPrice),
@@ -270,6 +294,8 @@ export async function executeTrade(
       priceB,
       longPrice,
       shortPrice,
+      longAsset: result.signalType === 'long' ? symbolA : symbolB,
+      shortAsset: result.signalType === 'long' ? symbolB : symbolA,
       upnlPct,
       entryPriceA: priceA,
       entryPriceB: priceB,
