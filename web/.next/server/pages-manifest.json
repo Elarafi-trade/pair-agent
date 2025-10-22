@@ -2,7 +2,7 @@
   "/_app": "pages/_app.js",
   "/_error": "pages/_error.js",
   "/_document": "pages/_document.js",
-  "/api/trades": "pages/api/trades.js",
+  "/": "pages/index.js",
   "/api/performance": "pages/api/performance.js",
-  "/": "pages/index.js"
+  "/api/trades": "pages/api/trades.js"
 }

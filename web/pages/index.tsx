@@ -49,7 +49,7 @@ interface TradeRecord {
 
 const fetchTrades = async (): Promise<TradeRecord[]> => {
   try {
-    const res = await fetch('/api/trades');
+    const res = await fetch('https://pair-agent.onrender.com/api/trades');
     if (!res.ok) return [];
     return await res.json();
   } catch {
