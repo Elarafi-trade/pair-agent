@@ -97,12 +97,12 @@ export async function initializeTables() {
         winning_trades INTEGER NOT NULL,
         losing_trades INTEGER NOT NULL,
         win_rate DECIMAL(10, 4) NOT NULL,
-        total_return_pct DECIMAL(10, 4) NOT NULL,
-        total_return_pct_leveraged DECIMAL(10, 4) NOT NULL,
+        total_return_pct DECIMAL(15, 4) NOT NULL,
+        total_return_pct_leveraged DECIMAL(15, 4) NOT NULL,
         avg_trade_duration_hours DECIMAL(10, 2) NOT NULL,
-        profit_factor DECIMAL(10, 4) NOT NULL,
-        estimated_apy DECIMAL(10, 4) NOT NULL,
-        estimated_apy_leveraged DECIMAL(10, 4) NOT NULL,
+        profit_factor DECIMAL(15, 4) NOT NULL,
+        estimated_apy DECIMAL(15, 4) NOT NULL,
+        estimated_apy_leveraged DECIMAL(15, 4) NOT NULL,
         last_updated TIMESTAMPTZ NOT NULL,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
@@ -135,7 +135,7 @@ export async function insertTrade(trade: TradeRecord) {
     RETURNING id
   `;
   
-  return result.rows[0].id;
+  return (result as any)[0].id;
 }
 
 /**
@@ -203,7 +203,7 @@ export async function getAllTrades(): Promise<TradeRecord[]> {
     LIMIT 100
   `;
   
-  return result.rows as TradeRecord[];
+  return result as unknown as TradeRecord[];
 }
 
 /**
@@ -238,7 +238,7 @@ export async function getOpenTrades(): Promise<TradeRecord[]> {
     ORDER BY timestamp DESC
   `;
   
-  return result.rows as TradeRecord[];
+  return result as unknown as TradeRecord[];
 }
 
 /**
@@ -275,7 +275,7 @@ export async function getClosedTrades(): Promise<TradeRecord[]> {
     ORDER BY timestamp DESC
   `;
   
-  return result.rows as TradeRecord[];
+  return result as unknown as TradeRecord[];
 }
 
 /**
@@ -323,9 +323,9 @@ export async function getPerformanceMetrics(): Promise<PerformanceMetrics | null
     LIMIT 1
   `;
   
-  if (result.rows.length === 0) {
+  if ((result as any).length === 0) {
     return null;
   }
   
-  return result.rows[0] as PerformanceMetrics;
+  return (result as any)[0] as PerformanceMetrics;
 }

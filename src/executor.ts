@@ -142,7 +142,7 @@ function dbTradeToLocal(dbTrade: any): TradeRecord {
  * Load existing trades from database on startup
  * @returns Number of trades loaded
  */
-export async function loadTradeHistory(filepath: string = './trades.json'): Promise<number> {
+export async function loadTradeHistory(): Promise<number> {
   try {
     await ensureDbInitialized();
     
@@ -160,30 +160,7 @@ export async function loadTradeHistory(filepath: string = './trades.json'): Prom
     return tradeHistory.length;
   } catch (error) {
     console.error(`[EXECUTOR] Failed to load trade history from database:`, error);
-    console.log(`[EXECUTOR] Falling back to file-based storage...`);
-    
-    // Fallback to file-based loading
-    try {
-      const fs = await import('fs/promises');
-      const data = await fs.readFile(filepath, 'utf-8');
-      const loadedTrades = JSON.parse(data) as TradeRecord[];
-      
-      tradeHistory.length = 0;
-      tradeHistory.push(...loadedTrades);
-      
-      const openTrades = loadedTrades.filter(t => t.status === 'open');
-      console.log(`[EXECUTOR] Loaded ${loadedTrades.length} trade(s) from ${filepath}`);
-      console.log(`[EXECUTOR] Found ${openTrades.length} open position(s) to track`);
-      
-      return loadedTrades.length;
-    } catch (fileError) {
-      if ((fileError as any).code === 'ENOENT') {
-        console.log(`[EXECUTOR] No existing trade history found`);
-      } else {
-        console.error(`[EXECUTOR] Failed to load trade history:`, fileError);
-      }
-      return 0;
-    }
+    throw error;
   }
 }
 
@@ -349,18 +326,12 @@ export function exportTradeHistory(): string {
 }
 
 /**
- * Save trade history to a file
- * @param filepath - Path to save file
+ * Save trade history (deprecated - trades are saved to DB in real-time)
+ * Kept for backward compatibility but does nothing
  */
-export async function saveTradeHistory(filepath: string = './trades.json'): Promise<void> {
-  try {
-    const fs = await import('fs/promises');
-    const data = exportTradeHistory();
-    await fs.writeFile(filepath, data, 'utf-8');
-    console.log(`[EXECUTOR] Trade history saved to ${filepath}`);
-  } catch (error) {
-    console.error(`[EXECUTOR] Failed to save trade history:`, error);
-  }
+export async function saveTradeHistory(): Promise<void> {
+  // No-op: trades are now saved to database in real-time via executeTrade() and closeTrade()
+  console.log(`[EXECUTOR] Trade history auto-saved to database`);
 }
 
 /**

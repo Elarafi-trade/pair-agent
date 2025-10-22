@@ -101,12 +101,12 @@ export async function initializeTables() {
         winning_trades INTEGER NOT NULL,
         losing_trades INTEGER NOT NULL,
         win_rate DECIMAL(10, 4) NOT NULL,
-        total_return_pct DECIMAL(10, 4) NOT NULL,
-        total_return_pct_leveraged DECIMAL(10, 4) NOT NULL,
+        total_return_pct DECIMAL(15, 4) NOT NULL,
+        total_return_pct_leveraged DECIMAL(15, 4) NOT NULL,
         avg_trade_duration_hours DECIMAL(10, 2) NOT NULL,
-        profit_factor DECIMAL(10, 4) NOT NULL,
-        estimated_apy DECIMAL(10, 4) NOT NULL,
-        estimated_apy_leveraged DECIMAL(10, 4) NOT NULL,
+        profit_factor DECIMAL(15, 4) NOT NULL,
+        estimated_apy DECIMAL(15, 4) NOT NULL,
+        estimated_apy_leveraged DECIMAL(15, 4) NOT NULL,
         last_updated TIMESTAMPTZ NOT NULL,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );

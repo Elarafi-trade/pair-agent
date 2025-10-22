@@ -15,7 +15,10 @@ dist/
 *.log
 npm-debug.log*
 yarn-debug.log*
+
+# Legacy file-based storage (deprecated - now using DB only)
 trades.json
+performance.json
 
 # IDE
 .vscode/

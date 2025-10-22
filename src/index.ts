@@ -325,7 +325,7 @@ async function main(): Promise<void> {
     
     // Load existing trade history
     console.log('');
-    await loadTradeHistory('./trades.json');
+    await loadTradeHistory();
     
     // Display performance metrics at startup
     const allTradesAtStartup = getTradeHistory();

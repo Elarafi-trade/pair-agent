@@ -168,13 +168,11 @@ export function formatPerformanceReport(metrics: PerformanceMetrics): string {
 }
 
 /**
- * Save performance metrics to database and file (fallback)
+ * Save performance metrics to database
  * @param metrics - Performance metrics object
- * @param filepath - Path to save file (fallback)
  */
 export async function savePerformanceMetrics(
-  metrics: PerformanceMetrics,
-  filepath: string = './performance.json'
+  metrics: PerformanceMetrics
 ): Promise<void> {
   try {
     await ensureDbInitialized();
@@ -200,28 +198,15 @@ export async function savePerformanceMetrics(
     console.log(`[PERFORMANCE] Metrics saved to database`);
   } catch (error) {
     console.error(`[PERFORMANCE] Failed to save metrics to database:`, error);
-    console.log(`[PERFORMANCE] Falling back to file-based storage...`);
-    
-    // Fallback to file
-    try {
-      const fs = await import('fs/promises');
-      const data = JSON.stringify(metrics, null, 2);
-      await fs.writeFile(filepath, data, 'utf-8');
-      console.log(`[PERFORMANCE] Metrics saved to ${filepath}`);
-    } catch (fileError) {
-      console.error(`[PERFORMANCE] Failed to save metrics to file:`, fileError);
-    }
+    throw error;
   }
 }
 
 /**
- * Load performance metrics from database (with file fallback)
- * @param filepath - Path to metrics file (fallback)
+ * Load performance metrics from database
  * @returns Performance metrics or null if not found
  */
-export async function loadPerformanceMetrics(
-  filepath: string = './performance.json'
-): Promise<PerformanceMetrics | null> {
+export async function loadPerformanceMetrics(): Promise<PerformanceMetrics | null> {
   try {
     await ensureDbInitialized();
     const dbMetrics = await dbGetPerformanceMetrics();
@@ -248,20 +233,7 @@ export async function loadPerformanceMetrics(
     return null;
   } catch (error) {
     console.error(`[PERFORMANCE] Failed to load metrics from database:`, error);
-    console.log(`[PERFORMANCE] Falling back to file-based storage...`);
-    
-    // Fallback to file
-    try {
-      const fs = await import('fs/promises');
-      const data = await fs.readFile(filepath, 'utf-8');
-      return JSON.parse(data) as PerformanceMetrics;
-    } catch (fileError) {
-      if ((fileError as any).code === 'ENOENT') {
-        console.log(`[PERFORMANCE] No existing metrics found`);
-      } else {
-        console.error(`[PERFORMANCE] Failed to load metrics from file:`, fileError);
-      }
-      return null;
-    }
+    throw error;
   }
 }
+

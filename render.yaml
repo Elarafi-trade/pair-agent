@@ -1,11 +1,12 @@
 services:
-  - type: worker
+  - type: web
     name: pair-agent-backend
     env: node
     plan: starter
     autoDeploy: true
     buildCommand: npm ci && npm run build
     startCommand: npm start
+    healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
         sync: false
