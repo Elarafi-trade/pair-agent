@@ -1,5 +1,6 @@
 // Copilot: Add a loop to run analysis every 1 hour using setInterval
 
+import 'dotenv/config';
 import { readFile } from 'fs/promises';
 import { fetchPairData, withRetry, fetchMultiplePrices } from './fetcher.js';
 import { analyzePair, meetsTradeSignalCriteria } from './pair_analysis.js';
@@ -110,7 +111,7 @@ async function analyzeSinglePair(
       const currentPriceA = dataA.prices[dataA.prices.length - 1];
       const currentPriceB = dataB.prices[dataB.prices.length - 1];
       
-      executeTrade(pairA, pairB, result, currentPriceA, currentPriceB);
+      await executeTrade(pairA, pairB, result, currentPriceA, currentPriceB);
       return true; // Signal found
     } else {
       console.log(`[SIGNAL] No actionable trade signal for this pair`);
@@ -241,7 +242,7 @@ async function runAnalysisCycle(config: Config): Promise<void> {
       // Skip on error
     }
   }
-  updateUPnLForOpenTrades((symbol) => latestPriceMap[symbol] ?? 0);
+  await updateUPnLForOpenTrades((symbol) => latestPriceMap[symbol] ?? 0);
 
   // Display trade summary
   const summary = getTradeSummary();

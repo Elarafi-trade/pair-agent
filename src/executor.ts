@@ -2,9 +2,9 @@
  * Update UPnL % for all open trades using latest prices
  * @param getLatestPrice - function(symbol: string) => number
  */
-export function updateUPnLForOpenTrades(getLatestPrice: (symbol: string) => number): void {
+export async function updateUPnLForOpenTrades(getLatestPrice: (symbol: string) => number): Promise<void> {
   for (const trade of tradeHistory) {
-    if (trade.longPrice !== undefined && trade.shortPrice !== undefined) {
+    if (trade.status === 'open' && trade.longPrice !== undefined && trade.shortPrice !== undefined) {
       // Get current prices for each leg
       const currentLong = getLatestPrice(trade.action === 'long' ? trade.symbolA : trade.symbolB);
       const currentShort = getLatestPrice(trade.action === 'long' ? trade.symbolB : trade.symbolA);
@@ -12,18 +12,38 @@ export function updateUPnLForOpenTrades(getLatestPrice: (symbol: string) => numb
       const longRet = (currentLong - trade.longPrice) / trade.longPrice;
       const shortRet = (trade.shortPrice - currentShort) / trade.shortPrice;
       // Pair trading PnL is longRet + shortRet
-      trade.upnlPct = ((longRet + shortRet) * 100);
+      const newUpnl = (longRet + shortRet) * 100;
+      trade.upnlPct = newUpnl;
+
+      // Update in database
+      if (trade.id) {
+        try {
+          await updateTradePnL(trade.id, newUpnl);
+        } catch (error) {
+          console.error(`[EXECUTOR] Failed to update PnL for trade ${trade.id}:`, error);
+        }
+      }
     }
   }
 }
 // Copilot: Create a function to simulate a trade and log results to console
 
 import { AnalysisResult } from './pair_analysis.js';
+import {
+  insertTrade,
+  closeTrade as dbCloseTrade,
+  updateTradePnL,
+  getOpenTrades as dbGetOpenTrades,
+  getAllTrades,
+  TradeRecord as DBTradeRecord,
+  initializeTables,
+} from './db.js';
 
 /**
  * Interface for a trade execution record
  */
 export interface TradeRecord {
+  id?: number;
   timestamp: number;
   pair: string;
   symbolA: string;
@@ -52,37 +72,119 @@ export interface TradeRecord {
 }
 
 /**
- * Simple in-memory trade log
+ * Simple in-memory trade log (kept for backward compatibility and fast access)
  */
 const tradeHistory: TradeRecord[] = [];
 
 /**
- * Load existing trades from file on startup
- * @param filepath - Path to trades file
+ * Database initialized flag
+ */
+let dbInitialized = false;
+
+/**
+ * Initialize database connection
+ */
+async function ensureDbInitialized() {
+  if (!dbInitialized) {
+    await initializeTables();
+    dbInitialized = true;
+  }
+}
+
+/**
+ * Convert DB trade record to local format
+ */
+function dbTradeToLocal(dbTrade: any): TradeRecord {
+  // Parse timestamp
+  const timestamp = typeof dbTrade.timestamp === 'string'
+    ? new Date(dbTrade.timestamp).getTime()
+    : dbTrade.timestamp;
+  
+  const closeTimestamp = dbTrade.closeTimestamp
+    ? typeof dbTrade.closeTimestamp === 'string'
+      ? new Date(dbTrade.closeTimestamp).getTime()
+      : dbTrade.closeTimestamp
+    : undefined;
+
+  // Extract symbolA and symbolB from pair (format: "SYMBOL1/SYMBOL2")
+  const [symbolA, symbolB] = dbTrade.pair.split('/');
+
+  return {
+    id: dbTrade.id,
+    timestamp,
+    pair: dbTrade.pair,
+    symbolA: symbolA || '',
+    symbolB: symbolB || '',
+    action: dbTrade.action as 'long' | 'short' | 'close',
+    zScore: Number(dbTrade.zScore),
+    correlation: Number(dbTrade.correlation),
+    spread: Number(dbTrade.spread),
+    beta: Number(dbTrade.beta),
+    reason: dbTrade.reason,
+    priceA: Number(dbTrade.longPrice), // Store longPrice as priceA for now
+    priceB: Number(dbTrade.shortPrice),
+    longPrice: Number(dbTrade.longPrice),
+    shortPrice: Number(dbTrade.shortPrice),
+    upnlPct: dbTrade.upnlPct ? Number(dbTrade.upnlPct) : 0,
+    entryPriceA: Number(dbTrade.longPrice),
+    entryPriceB: Number(dbTrade.shortPrice),
+    volatility: dbTrade.volatility ? Number(dbTrade.volatility) : 0,
+    timeframe: '1h',
+    engine: 'pair-agent v1.0',
+    remarks: '-',
+    status: dbTrade.status as 'open' | 'closed',
+    closeTimestamp,
+    closeReason: dbTrade.closeReason,
+    closePnL: dbTrade.closePnL ? Number(dbTrade.closePnL) : undefined,
+  };
+}
+
+/**
+ * Load existing trades from database on startup
  * @returns Number of trades loaded
  */
 export async function loadTradeHistory(filepath: string = './trades.json'): Promise<number> {
   try {
-    const fs = await import('fs/promises');
-    const data = await fs.readFile(filepath, 'utf-8');
-    const loadedTrades = JSON.parse(data) as TradeRecord[];
+    await ensureDbInitialized();
     
-    // Clear existing and load from file
+    // Load all trades from database
+    const dbTrades = await getAllTrades();
+    
+    // Clear existing and load from database
     tradeHistory.length = 0;
-    tradeHistory.push(...loadedTrades);
+    tradeHistory.push(...dbTrades.map(dbTradeToLocal));
     
-    const openTrades = loadedTrades.filter(t => t.status === 'open');
-    console.log(`[EXECUTOR] Loaded ${loadedTrades.length} trade(s) from ${filepath}`);
+    const openTrades = tradeHistory.filter(t => t.status === 'open');
+    console.log(`[EXECUTOR] Loaded ${tradeHistory.length} trade(s) from database`);
     console.log(`[EXECUTOR] Found ${openTrades.length} open position(s) to track`);
     
-    return loadedTrades.length;
+    return tradeHistory.length;
   } catch (error) {
-    if ((error as any).code === 'ENOENT') {
-      console.log(`[EXECUTOR] No existing trade history found at ${filepath}`);
-    } else {
-      console.error(`[EXECUTOR] Failed to load trade history:`, error);
+    console.error(`[EXECUTOR] Failed to load trade history from database:`, error);
+    console.log(`[EXECUTOR] Falling back to file-based storage...`);
+    
+    // Fallback to file-based loading
+    try {
+      const fs = await import('fs/promises');
+      const data = await fs.readFile(filepath, 'utf-8');
+      const loadedTrades = JSON.parse(data) as TradeRecord[];
+      
+      tradeHistory.length = 0;
+      tradeHistory.push(...loadedTrades);
+      
+      const openTrades = loadedTrades.filter(t => t.status === 'open');
+      console.log(`[EXECUTOR] Loaded ${loadedTrades.length} trade(s) from ${filepath}`);
+      console.log(`[EXECUTOR] Found ${openTrades.length} open position(s) to track`);
+      
+      return loadedTrades.length;
+    } catch (fileError) {
+      if ((fileError as any).code === 'ENOENT') {
+        console.log(`[EXECUTOR] No existing trade history found`);
+      } else {
+        console.error(`[EXECUTOR] Failed to load trade history:`, fileError);
+      }
+      return 0;
     }
-    return 0;
   }
 }
 
@@ -97,13 +199,13 @@ export async function loadTradeHistory(filepath: string = './trades.json'): Prom
  * @param priceB - Current price of symbol B
  * @returns Trade record
  */
-export function executeTrade(
+export async function executeTrade(
   symbolA: string,
   symbolB: string,
   result: AnalysisResult,
   priceA: number,
   priceB: number
-): TradeRecord | null {
+): Promise<TradeRecord | null> {
   // Don't execute if signal is neutral
   if (result.signalType === 'neutral') {
     console.log(`[EXECUTOR] No trade: ${symbolA}/${symbolB} signal is neutral`);
@@ -135,41 +237,81 @@ export function executeTrade(
     upnlPct = 0;
   }
 
-  // Create trade record
-  const trade: TradeRecord = {
-    timestamp: Date.now(),
-    pair: `${symbolA}/${symbolB}`,
-    symbolA,
-    symbolB,
-    action: result.signalType,
+  const timestamp = new Date().toISOString();
+  const pair = `${symbolA}/${symbolB}`;
+
+  // Determine signal text
+  let signal = '';
+  if (result.signalType === 'long') {
+    signal = `LONG ${symbolA}, SHORT ${symbolB}`;
+  } else if (result.signalType === 'short') {
+    signal = `SHORT ${symbolA}, LONG ${symbolB}`;
+  }
+
+  // Create database record
+  const dbTrade: DBTradeRecord = {
+    timestamp,
+    pair,
+    action: signal,
+    signal,
     zScore: result.zScore,
     correlation: result.corr,
     spread: result.spread,
+    spreadMean: result.mean,
+    spreadStd: result.std,
     beta: result.beta,
     reason,
-    priceA,
-    priceB,
-    longPrice,
-    shortPrice,
-    upnlPct,
-    // enrich with entry prices and volatility
-    entryPriceA: priceA,
-    entryPriceB: priceB,
+    longAsset: result.signalType === 'long' ? symbolA : symbolB,
+    shortAsset: result.signalType === 'long' ? symbolB : symbolA,
+    longPrice: longPrice!,
+    shortPrice: shortPrice!,
+    status: 'open',
+    upnlPct: 0,
     volatility: result.std,
-    timeframe: '1h',
-    engine: 'pair-agent v1.0',
-    remarks: '-',
-    status: 'open', // Trade starts as open
+    halfLife: 0,
+    sharpe: 0,
   };
-  
-  // Log trade execution
-  console.log(`
+
+  try {
+    // Save to database
+    await ensureDbInitialized();
+    const tradeId = await insertTrade(dbTrade);
+
+    // Create local trade record
+    const trade: TradeRecord = {
+      id: tradeId,
+      timestamp: new Date(timestamp).getTime(),
+      pair,
+      symbolA,
+      symbolB,
+      action: result.signalType,
+      zScore: result.zScore,
+      correlation: result.corr,
+      spread: result.spread,
+      beta: result.beta,
+      reason,
+      priceA,
+      priceB,
+      longPrice,
+      shortPrice,
+      upnlPct,
+      entryPriceA: priceA,
+      entryPriceB: priceB,
+      volatility: result.std,
+      timeframe: '1h',
+      engine: 'pair-agent v1.0',
+      remarks: '-',
+      status: 'open',
+    };
+    
+    // Log trade execution
+    console.log(`
 ╔═══════════════════════════════════════════╗
 ║         TRADE EXECUTED (SIMULATED)        ║
 ╚═══════════════════════════════════════════╝
-  Time:     ${new Date(trade.timestamp).toISOString()}
+  Time:     ${timestamp}
   Pair:     ${trade.pair}
-  Action:   ${trade.action === 'short' ? `SHORT ${symbolA}, LONG ${symbolB}` : trade.action === 'long' ? `LONG ${symbolA}, SHORT ${symbolB}` : trade.action.toUpperCase()}
+  Action:   ${signal}
   Z-Score:  ${trade.zScore.toFixed(2)}
   Corr:     ${trade.correlation.toFixed(2)}
   ─────────────────────────────────────────────
@@ -179,11 +321,16 @@ export function executeTrade(
   Reason: ${reason}
 ╔═══════════════════════════════════════════╗
 `);
-  
-  // Store in history
-  tradeHistory.push(trade);
-  
-  return trade;
+    
+    // Store in history
+    tradeHistory.push(trade);
+    
+    return trade;
+  } catch (error) {
+    console.error('[EXECUTOR] Failed to save trade to database:', error);
+    console.log('[EXECUTOR] Trade not recorded');
+    return null;
+  }
 }
 
 /**
@@ -293,27 +440,41 @@ export const DEFAULT_EXIT_CONDITIONS: ExitConditions = {
  * @param currentPriceA - Current price of symbol A
  * @param currentPriceB - Current price of symbol B
  */
-export function closeTrade(
+export async function closeTrade(
   trade: TradeRecord,
   reason: string,
   currentPriceA: number,
   currentPriceB: number
-): void {
+): Promise<void> {
   if (trade.status === 'closed') {
     console.log(`[EXECUTOR] Trade ${trade.pair} is already closed`);
     return;
   }
 
+  const closeTimestamp = new Date().toISOString();
+  const closePnL = trade.upnlPct ?? 0;
+
+  // Update in database
+  if (trade.id) {
+    try {
+      await ensureDbInitialized();
+      await dbCloseTrade(trade.id, closeTimestamp, reason, closePnL);
+    } catch (error) {
+      console.error('[EXECUTOR] Failed to update trade in database:', error);
+    }
+  }
+
+  // Update local record
   trade.status = 'closed';
-  trade.closeTimestamp = Date.now();
+  trade.closeTimestamp = new Date(closeTimestamp).getTime();
   trade.closeReason = reason;
-  trade.closePnL = trade.upnlPct ?? 0;
+  trade.closePnL = closePnL;
 
   console.log(`
 ╔═══════════════════════════════════════════╗
 ║          TRADE CLOSED (SIMULATED)         ║
 ╚═══════════════════════════════════════════╝
-  Time:     ${new Date(trade.closeTimestamp).toISOString()}
+  Time:     ${closeTimestamp}
   Pair:     ${trade.pair}
   Action:   ${trade.action.toUpperCase()}
   Duration: ${((trade.closeTimestamp - trade.timestamp) / 1000 / 60).toFixed(2)} minutes
@@ -323,9 +484,9 @@ export function closeTrade(
   Entry ${trade.symbolB}: $${trade.entryPriceB?.toFixed(2) ?? 'N/A'}
   Exit ${trade.symbolB}:  $${currentPriceB.toFixed(2)}
   ─────────────────────────────────────────────
-  PnL:      ${trade.closePnL >= 0 ? '+' : ''}${trade.closePnL.toFixed(2)}%
+  PnL:      ${closePnL >= 0 ? '+' : ''}${closePnL.toFixed(2)}%
   Reason:   ${reason}
-╔═══════════════════════════════════════════╗
+╔═══════════════════════════════════════════╝
 `);
 }
 

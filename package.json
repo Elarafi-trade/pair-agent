@@ -19,7 +19,9 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@neondatabase/serverless": "^1.0.2",
     "axios": "^1.6.2",
+    "dotenv": "^17.2.3",
     "mathjs": "^12.2.0"
   },
   "devDependencies": {

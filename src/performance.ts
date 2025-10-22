@@ -1,6 +1,11 @@
 // Agent performance metrics tracking
 
 import { TradeRecord } from './executor.js';
+import {
+  savePerformanceMetrics as dbSavePerformanceMetrics,
+  getPerformanceMetrics as dbGetPerformanceMetrics,
+  initializeTables,
+} from './db.js';
 
 /**
  * Performance metrics interface
@@ -19,6 +24,21 @@ export interface PerformanceMetrics {
   avgDuration: number; // Hours
   startDate: number; // Timestamp
   lastUpdated: number; // Timestamp
+}
+
+/**
+ * Database initialized flag
+ */
+let dbInitialized = false;
+
+/**
+ * Initialize database connection
+ */
+async function ensureDbInitialized() {
+  if (!dbInitialized) {
+    await initializeTables();
+    dbInitialized = true;
+  }
 }
 
 /**
@@ -148,42 +168,100 @@ export function formatPerformanceReport(metrics: PerformanceMetrics): string {
 }
 
 /**
- * Save performance metrics to file
+ * Save performance metrics to database and file (fallback)
  * @param metrics - Performance metrics object
- * @param filepath - Path to save file
+ * @param filepath - Path to save file (fallback)
  */
 export async function savePerformanceMetrics(
   metrics: PerformanceMetrics,
   filepath: string = './performance.json'
 ): Promise<void> {
   try {
-    const fs = await import('fs/promises');
-    const data = JSON.stringify(metrics, null, 2);
-    await fs.writeFile(filepath, data, 'utf-8');
-    console.log(`[PERFORMANCE] Metrics saved to ${filepath}`);
+    await ensureDbInitialized();
+    
+    // Convert to database format
+    const dbMetrics = {
+      totalTrades: metrics.totalTrades,
+      openTrades: 0, // Will be calculated from current trades
+      closedTrades: metrics.totalTrades,
+      winningTrades: metrics.winningTrades,
+      losingTrades: metrics.losingTrades,
+      winRate: metrics.winRate,
+      totalReturnPct: metrics.totalReturnWithoutLeverage,
+      totalReturnPctLeveraged: metrics.totalReturnWithLeverage,
+      avgTradeDurationHours: metrics.avgDuration,
+      profitFactor: metrics.profitFactor,
+      estimatedAPY: metrics.apy,
+      estimatedAPYLeveraged: metrics.apy,
+      lastUpdated: new Date(metrics.lastUpdated).toISOString(),
+    };
+    
+    await dbSavePerformanceMetrics(dbMetrics);
+    console.log(`[PERFORMANCE] Metrics saved to database`);
   } catch (error) {
-    console.error(`[PERFORMANCE] Failed to save metrics:`, error);
+    console.error(`[PERFORMANCE] Failed to save metrics to database:`, error);
+    console.log(`[PERFORMANCE] Falling back to file-based storage...`);
+    
+    // Fallback to file
+    try {
+      const fs = await import('fs/promises');
+      const data = JSON.stringify(metrics, null, 2);
+      await fs.writeFile(filepath, data, 'utf-8');
+      console.log(`[PERFORMANCE] Metrics saved to ${filepath}`);
+    } catch (fileError) {
+      console.error(`[PERFORMANCE] Failed to save metrics to file:`, fileError);
+    }
   }
 }
 
 /**
- * Load performance metrics from file
- * @param filepath - Path to metrics file
+ * Load performance metrics from database (with file fallback)
+ * @param filepath - Path to metrics file (fallback)
  * @returns Performance metrics or null if not found
  */
 export async function loadPerformanceMetrics(
   filepath: string = './performance.json'
 ): Promise<PerformanceMetrics | null> {
   try {
-    const fs = await import('fs/promises');
-    const data = await fs.readFile(filepath, 'utf-8');
-    return JSON.parse(data) as PerformanceMetrics;
-  } catch (error) {
-    if ((error as any).code === 'ENOENT') {
-      console.log(`[PERFORMANCE] No existing metrics found at ${filepath}`);
-    } else {
-      console.error(`[PERFORMANCE] Failed to load metrics:`, error);
+    await ensureDbInitialized();
+    const dbMetrics = await dbGetPerformanceMetrics();
+    
+    if (dbMetrics) {
+      // Convert from database format
+      return {
+        totalTrades: dbMetrics.totalTrades,
+        winningTrades: dbMetrics.winningTrades,
+        losingTrades: dbMetrics.losingTrades,
+        winRate: Number(dbMetrics.winRate),
+        totalReturnWithLeverage: Number(dbMetrics.totalReturnPctLeveraged),
+        totalReturnWithoutLeverage: Number(dbMetrics.totalReturnPct),
+        apy: Number(dbMetrics.estimatedAPY),
+        avgTradesPerDay: 0, // Can be calculated if needed
+        avgReturnsPerDay: 0, // Can be calculated if needed
+        profitFactor: Number(dbMetrics.profitFactor),
+        avgDuration: Number(dbMetrics.avgTradeDurationHours),
+        startDate: Date.now(), // Not stored in DB
+        lastUpdated: new Date(dbMetrics.lastUpdated).getTime(),
+      };
     }
+    
     return null;
+  } catch (error) {
+    console.error(`[PERFORMANCE] Failed to load metrics from database:`, error);
+    console.log(`[PERFORMANCE] Falling back to file-based storage...`);
+    
+    // Fallback to file
+    try {
+      const fs = await import('fs/promises');
+      const data = await fs.readFile(filepath, 'utf-8');
+      return JSON.parse(data) as PerformanceMetrics;
+    } catch (fileError) {
+      if ((fileError as any).code === 'ENOENT') {
+        console.log(`[PERFORMANCE] No existing metrics found`);
+      } else {
+        console.error(`[PERFORMANCE] Failed to load metrics from file:`, fileError);
+      }
+      return null;
+    }
   }
 }
