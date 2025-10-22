@@ -85,10 +85,18 @@ export function calculatePerformanceMetrics(trades: TradeRecord[]): PerformanceM
   const avgTradesPerDay = totalDays > 0 ? totalTrades / totalDays : 0;
 
   // APY calculation: ((1 + total return)^(365/days) - 1) * 100
+  // Cap APY calculation to prevent infinity when time period is very small
   const totalReturnDecimal = totalReturnWithLeverage / 100;
-  const apy = totalDays > 0 
-    ? (Math.pow(1 + totalReturnDecimal, 365 / totalDays) - 1) * 100
-    : 0;
+  let apy = 0;
+  if (totalDays > 0) {
+    const rawApy = (Math.pow(1 + totalReturnDecimal, 365 / totalDays) - 1) * 100;
+    // Cap at ±999,999% to prevent database overflow
+    apy = Math.max(-999999, Math.min(999999, rawApy));
+    // Set to 0 if result is not finite (Infinity, -Infinity, NaN)
+    if (!Number.isFinite(apy)) {
+      apy = 0;
+    }
+  }
 
   // Average returns per day
   const avgReturnsPerDay = totalDays > 0 ? totalReturnWithoutLeverage / totalDays : 0;
@@ -177,6 +185,13 @@ export async function savePerformanceMetrics(
   try {
     await ensureDbInitialized();
     
+    // Sanitize all numeric values to prevent database overflow
+    // Database uses NUMERIC(15,4), so max value is 99,999,999,999.9999
+    const sanitize = (val: number): number => {
+      if (!Number.isFinite(val)) return 0;
+      return Math.max(-99999999999, Math.min(99999999999, val));
+    };
+    
     // Convert to database format
     const dbMetrics = {
       totalTrades: metrics.totalTrades,
@@ -184,13 +199,13 @@ export async function savePerformanceMetrics(
       closedTrades: metrics.totalTrades,
       winningTrades: metrics.winningTrades,
       losingTrades: metrics.losingTrades,
-      winRate: metrics.winRate,
-      totalReturnPct: metrics.totalReturnWithoutLeverage,
-      totalReturnPctLeveraged: metrics.totalReturnWithLeverage,
-      avgTradeDurationHours: metrics.avgDuration,
-      profitFactor: metrics.profitFactor,
-      estimatedAPY: metrics.apy,
-      estimatedAPYLeveraged: metrics.apy,
+      winRate: sanitize(metrics.winRate),
+      totalReturnPct: sanitize(metrics.totalReturnWithoutLeverage),
+      totalReturnPctLeveraged: sanitize(metrics.totalReturnWithLeverage),
+      avgTradeDurationHours: sanitize(metrics.avgDuration),
+      profitFactor: sanitize(metrics.profitFactor),
+      estimatedAPY: sanitize(metrics.apy),
+      estimatedAPYLeveraged: sanitize(metrics.apy),
       lastUpdated: new Date(metrics.lastUpdated).toISOString(),
     };
     
