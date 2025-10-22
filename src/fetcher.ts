@@ -1,31 +1,27 @@
-// Copilot: Fetch the last 100 hourly klines for crypto pairs from Binance API
+// Fetch market data using Drift Protocol APIs
 
 import axios from 'axios';
+import { schedule } from './rate_limiter.js';
 
-// Optional Binance API key support (higher limits). Do not log this value.
-const BINANCE_API_KEY = process.env.BINANCE_API_KEY;
-const binanceHeaders = BINANCE_API_KEY ? { 'X-MBX-APIKEY': BINANCE_API_KEY } : undefined;
+// DLOB server (for orderbook/oracle snapshots) and Data API (for historical TWAPs)
+const DRIFT_DLOB_BASE = process.env.DRIFT_BASE_URL || 'https://dlob.drift.trade';
+const DRIFT_DATA_API_BASE = process.env.DRIFT_DATA_API_BASE || 'https://data.api.drift.trade';
 
 /**
- * Interface for Binance kline (candlestick) data
+ * Interface for Drift OHLC candle data
  */
-interface BinanceKline {
-  openTime: number;
-  open: string;
-  high: string;
-  low: string;
-  close: string;
-  volume: string;
-  closeTime: number;
+// Note: Drift does not expose a public REST candles endpoint. We approximate
+// historical prices using oracle TWAPs from the Data API fundingRates endpoint.
+interface FundingRateRecord {
+  ts?: string; // ISO timestamp string (if available)
+  slot?: number;
+  oraclePriceTwap: string; // 1e6 precision
 }
 
 /**
- * Interface for Binance ticker price response
+ * Interface for Drift oracle price data
  */
-interface BinanceTickerPrice {
-  symbol: string;
-  price: string;
-}
+// no-op placeholder removed
 
 /**
  * Interface for pair price data
@@ -37,70 +33,104 @@ export interface PairData {
 }
 
 /**
- * Fetches hourly candlestick data from Binance API
- * @param symbol - Trading pair symbol (e.g., 'BTCUSDT')
+ * Fetches historical price series using oracle TWAPs from Drift Data API
+ * @param marketName - Drift market name (e.g., 'SOL-PERP')
  * @param limit - Number of data points to fetch (default: 100)
- * @returns Array of closing prices
+ * @returns Array of prices and timestamps
  */
-async function fetchKlines(
-  symbol: string,
+async function fetchOracleTwapSeries(
+  marketName: string,
   limit: number = 100
 ): Promise<{ prices: number[]; timestamps: number[] }> {
-  const baseUrl = 'https://api.binance.com/api/v3/klines';
-  
   try {
-    const response = await axios.get(baseUrl, {
-      params: {
-        symbol,
-        interval: '1h',
-        limit,
-      },
-      timeout: 10000,
-      headers: binanceHeaders,
-    });
-
-    const klines: BinanceKline[] = response.data.map((k: any[]) => ({
-      openTime: k[0],
-      open: k[1],
-      high: k[2],
-      low: k[3],
-      close: k[4],
-      volume: k[5],
-      closeTime: k[6],
+    // Data API: GET /fundingRates?marketName=SOL-PERP
+    // Use oraclePriceTwap (1e6 precision) as proxy for historical price
+    const url = `${DRIFT_DATA_API_BASE}/fundingRates`;
+    const response = await schedule(() => axios.get(url, {
+      params: { marketName: marketName },
+      timeout: 15000,
     }));
 
-    // Extract closing prices and timestamps
-    const prices = klines.map((k) => parseFloat(k.close));
-    const timestamps = klines.map((k) => k.closeTime);
+    const records: FundingRateRecord[] = Array.isArray(response.data?.fundingRates)
+      ? response.data.fundingRates
+      : Array.isArray(response.data)
+        ? response.data
+        : [];
+
+    if (!records || records.length === 0) {
+      const err: any = new Error(`No fundingRates data returned for ${marketName}`);
+      // Mark with a custom flag for upstream retry logic
+      err.isNoData = true;
+      throw err;
+    }
+
+    // Convert to prices (float) and timestamps
+    const fullPrices = records
+      .map((r) => Number(r.oraclePriceTwap) / 1e6)
+      .filter((v) => Number.isFinite(v) && v > 0);
+
+    // Build timestamps: prefer API 'ts' when present; otherwise synthesize 1h steps
+    const tsFromApi: (number | undefined)[] = records.map((r) => (r.ts ? Date.parse(r.ts) : undefined));
+    const fullTimestamps: number[] = new Array(records.length);
+    const now = Date.now();
+    for (let i = 0; i < records.length; i++) {
+      if (typeof tsFromApi[i] === 'number' && Number.isFinite(tsFromApi[i])) {
+        fullTimestamps[i] = tsFromApi[i] as number;
+      } else {
+        // assume hourly cadence
+        fullTimestamps[i] = now - (records.length - 1 - i) * 3600_000;
+      }
+    }
+
+    // Keep the most recent 'limit' points
+    const start = Math.max(0, fullPrices.length - limit);
+    const prices = fullPrices.slice(start);
+    const timestamps = (fullTimestamps as number[]).slice(start);
+
+    if (prices.length < Math.min(50, limit)) {
+      const err: any = new Error(`Insufficient TWAP data for ${marketName}: got ${prices.length}`);
+      err.isNoData = true;
+      throw err;
+    }
 
     return { prices, timestamps };
   } catch (error) {
     if (axios.isAxiosError(error)) {
-      throw new Error(
-        `Failed to fetch data for ${symbol}: ${error.message}`
+      const status = error.response?.status;
+      const err: any = new Error(
+        `Failed to fetch TWAP series for ${marketName}: ${error.message}${status ? ` (status ${status})` : ''}`
       );
+      // Propagate client errors as non-retriable EXCEPT 429 (rate limit)
+      const is4xx = !!status && status >= 400 && status < 500;
+      err.isClientError = is4xx && status !== 429;
+      err.isRateLimited = status === 429;
+      throw err;
     }
     throw error;
   }
 }
 
 /**
- * Fetches price data for a pair of trading symbols
- * @param pairA - First trading symbol (e.g., 'BTCUSDT')
- * @param pairB - Second trading symbol (e.g., 'ETHUSDT')
+ * Fetches price data for a pair of Drift market indices
+ * @param marketIndexA - First market index (e.g., 0 for SOL-PERP)
+ * @param marketIndexB - Second market index (e.g., 1 for BTC-PERP)
+ * @param symbolA - Symbol name for logging (e.g., 'SOL-PERP')
+ * @param symbolB - Symbol name for logging (e.g., 'BTC-PERP')
  * @param limit - Number of data points to fetch
- * @returns Object containing data for both pairs
+ * @returns Object containing data for both markets
  */
 export async function fetchPairData(
-  pairA: string,
-  pairB: string,
+  _marketIndexA: number, // kept for compatibility; not used with Data API
+  _marketIndexB: number, // kept for compatibility; not used with Data API
+  symbolA: string,
+  symbolB: string,
   limit: number = 100
 ): Promise<{ dataA: PairData; dataB: PairData }> {
   try {
-    // Fetch data for both pairs in parallel
+    // Fetch data for both markets in parallel
     const [resultA, resultB] = await Promise.all([
-      fetchKlines(pairA, limit),
-      fetchKlines(pairB, limit),
+      fetchOracleTwapSeries(symbolA, limit),
+      fetchOracleTwapSeries(symbolB, limit),
     ]);
 
     // Handle mismatched data lengths by trimming to the shorter length
@@ -108,7 +138,7 @@ export async function fetchPairData(
     
     if (resultA.prices.length !== resultB.prices.length) {
       console.warn(
-        `[FETCHER] Mismatched data lengths: ${pairA}=${resultA.prices.length}, ${pairB}=${resultB.prices.length}. Using ${minLength} data points.`
+        `[FETCHER] Mismatched data lengths: ${symbolA}=${resultA.prices.length}, ${symbolB}=${resultB.prices.length}. Using ${minLength} data points.`
       );
     }
 
@@ -121,18 +151,18 @@ export async function fetchPairData(
 
     return {
       dataA: {
-        symbol: pairA,
+        symbol: symbolA,
         prices: resultA.prices.slice(0, minLength),
         timestamps: resultA.timestamps.slice(0, minLength),
       },
       dataB: {
-        symbol: pairB,
+        symbol: symbolB,
         prices: resultB.prices.slice(0, minLength),
         timestamps: resultB.timestamps.slice(0, minLength),
       },
     };
   } catch (error) {
-    console.error(`Error fetching pair data (${pairA}/${pairB}):`, error);
+    console.error(`Error fetching pair data (${symbolA}/${symbolB}):`, error);
     throw error;
   }
 }
@@ -151,54 +181,87 @@ export async function withRetry<T>(
   try {
     return await fn();
   } catch (error) {
+  // Do not retry on known client/no-data errors
+    const clientErr = (error && (error as any).isClientError) === true;
+    const noDataErr = (error && (error as any).isNoData) === true;
+    const rateLimited = (error && (error as any).isRateLimited) === true;
+
+    if (clientErr || noDataErr) {
+      throw error;
+    }
+
     if (retries === 0) throw error;
     
-    console.warn(`Retrying... (${retries} attempts left)`);
-    await new Promise((resolve) => setTimeout(resolve, delay));
+    const backoff = rateLimited ? Math.max(delay * 2, 1500) : delay;
+    console.warn(`Retrying... (${retries} attempts left)${rateLimited ? ' [429 backoff]' : ''}`);
+    await new Promise((resolve) => setTimeout(resolve, backoff));
     
     return withRetry(fn, retries - 1, delay * 2);
   }
 }
 
 /**
- * Fetch current price for a single symbol using Binance ticker API
- * @param symbol - Trading pair symbol (e.g., 'BTCUSDC')
- * @returns Current price
+ * Fetch current oracle price for a Drift market
+ * @param marketIndex - Market index (e.g., 0 for SOL-PERP)
+ * @returns Current oracle price
  */
-export async function fetchCurrentPrice(symbol: string): Promise<number> {
+export async function fetchCurrentPrice(marketIndex: number): Promise<number> {
   try {
-    const response = await axios.get<BinanceTickerPrice>(
-      `https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`,
-      { timeout: 10000, headers: binanceHeaders }
-    );
-    return parseFloat(response.data.price);
+    // Prefer DLOB L2 snapshot with oracle field; fallback to Data API TWAP
+    const l2 = await schedule(() => axios.get(`${DRIFT_DLOB_BASE}/l2`, {
+      params: { marketIndex, includeOracle: true, depth: 1 },
+      timeout: 8000,
+    }).then(r => r.data).catch(() => null));
+
+    const oracleFromL2 = l2?.oracle ?? l2?.oracleData?.price;
+    if (typeof oracleFromL2 === 'number' && Number.isFinite(oracleFromL2) && oracleFromL2 > 0) {
+      return oracleFromL2;
+    }
+
+    // Fallback requires symbol; without symbol mapping we cannot query by name here
+    throw new Error('Oracle price unavailable (missing symbol mapping for Data API fallback)');
   } catch (error) {
-    console.error(`[FETCHER] Failed to fetch current price for ${symbol}:`, error);
-    throw new Error(`Could not fetch price for ${symbol}`);
+    console.error(`[FETCHER] Failed to fetch current price for market ${marketIndex}:`, error);
+    throw new Error(`Could not fetch price for market ${marketIndex}`);
   }
 }
 
 /**
- * Fetch current prices for multiple symbols in batch
- * @param symbols - Array of trading pair symbols
- * @returns Map of symbol to current price
+ * Fetch current oracle prices for multiple Drift markets in batch
+ * @param marketIndices - Array of market indices
+ * @returns Map of market index to current price
  */
-export async function fetchMultiplePrices(symbols: string[]): Promise<Record<string, number>> {
+export async function fetchMultiplePrices(marketIndices: number[]): Promise<Record<number, number>> {
   try {
-    const symbolsParam = JSON.stringify(symbols);
-    const response = await axios.get<BinanceTickerPrice[]>(
-      `https://api.binance.com/api/v3/ticker/price?symbols=${symbolsParam}`,
-      { timeout: 10000, headers: binanceHeaders }
-    );
-    
-    const priceMap: Record<string, number> = {};
-    response.data.forEach((item) => {
-      priceMap[item.symbol] = parseFloat(item.price);
+    // Fetch prices in parallel for each market
+    const pricePromises = marketIndices.map(async (idx) => {
+      const price = await fetchCurrentPrice(idx);
+      return { idx, price };
     });
+
+    const results = await Promise.all(pricePromises);
     
+    const priceMap: Record<number, number> = {};
+    results.forEach(({ idx, price }) => {
+      priceMap[idx] = price;
+    });
+
     return priceMap;
   } catch (error) {
     console.error(`[FETCHER] Failed to fetch multiple prices:`, error);
-    throw new Error('Could not fetch prices for symbols');
+    throw new Error('Could not fetch prices for markets');
+  }
+}
+
+/**
+ * Quick availability check for TWAP history on a given market name.
+ * Used to prefilter curated markets to avoid repeated 4xx/no-data errors.
+ */
+export async function hasTwapHistory(marketName: string, minPoints: number = 50): Promise<boolean> {
+  try {
+    const { prices } = await fetchOracleTwapSeries(marketName, minPoints);
+    return prices.length >= minPoints;
+  } catch (err) {
+    return false;
   }
 }

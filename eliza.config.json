@@ -10,7 +10,7 @@
     "updateInterval": 3600000,
     "zScoreThreshold": 2.0,
     "correlationThreshold": 0.8,
-    "randomPairCount": 10
+    "randomPairCount": 5
   },
   "exitConditions": {
     "meanReversionThreshold": 0.5,
@@ -19,8 +19,8 @@
     "maxHoldingPeriodDays": 7
   },
   "apis": {
-    "binance": {
-      "baseUrl": "https://api.binance.com",
+    "drift": {
+      "baseUrl": "https://dlob.drift.trade",
       "interval": "1h"
     }
   },

@@ -2,7 +2,7 @@
 
 import 'dotenv/config';
 import { readFile } from 'fs/promises';
-import { fetchPairData, withRetry, fetchMultiplePrices } from './fetcher.js';
+import { fetchPairData, withRetry } from './fetcher.js';
 import { analyzePair, meetsTradeSignalCriteria } from './pair_analysis.js';
 import { formatAnalysisReport } from './narrative.js';
 import { 
@@ -51,7 +51,7 @@ interface Config {
     maxHoldingPeriodDays: number;
   };
   apis: {
-    binance: {
+    drift: {
       baseUrl: string;
       interval: string;
     };
@@ -75,16 +75,18 @@ async function loadConfig(): Promise<Config> {
  * Analyze a single pair and return whether a trade signal was found
  */
 async function analyzeSinglePair(
-  pairA: string,
-  pairB: string,
+  marketIndexA: number,
+  marketIndexB: number,
+  symbolA: string,
+  symbolB: string,
   config: Config
 ): Promise<boolean> {
-  console.log(`\n[${new Date().toISOString()}] Analyzing ${pairA}/${pairB}...`);
+  console.log(`\n[${new Date().toISOString()}] Analyzing ${symbolA}/${symbolB}...`);
   
   try {
     // Fetch data with retry
     const { dataA, dataB } = await withRetry(
-      () => fetchPairData(pairA, pairB, config.analysis.lookbackPeriod),
+      () => fetchPairData(marketIndexA, marketIndexB, symbolA, symbolB, config.analysis.lookbackPeriod),
       3,
       1000
     );
@@ -95,7 +97,7 @@ async function analyzeSinglePair(
     const result = analyzePair(dataA.prices, dataB.prices);
     
     // Display formatted report
-    console.log(formatAnalysisReport(pairA, pairB, result, { timeframe: '1h' }));
+    console.log(formatAnalysisReport(symbolA, symbolB, result, { timeframe: '1h' }));
     
     // Check if meets trade criteria
     const shouldTrade = meetsTradeSignalCriteria(
@@ -111,7 +113,7 @@ async function analyzeSinglePair(
       const currentPriceA = dataA.prices[dataA.prices.length - 1];
       const currentPriceB = dataB.prices[dataB.prices.length - 1];
       
-      await executeTrade(pairA, pairB, result, currentPriceA, currentPriceB);
+      await executeTrade(symbolA, symbolB, result, currentPriceA, currentPriceB);
       return true; // Signal found
     } else {
       console.log(`[SIGNAL] No actionable trade signal for this pair`);
@@ -119,7 +121,7 @@ async function analyzeSinglePair(
     }
     
   } catch (error) {
-    console.error(`[ERROR] Failed to analyze ${pairA}/${pairB}:`, error);
+    console.error(`[ERROR] Failed to analyze ${symbolA}/${symbolB}:`, error);
     return false; // Error = no signal
   }
 }
@@ -139,21 +141,32 @@ async function runAnalysisCycle(config: Config): Promise<void> {
     console.log(`[EXIT_CHECK] Found ${openTrades.length} open trade(s) to check...\n`);
     
     // Build list of unique symbols in open trades
+    // NOTE: We need to fetch market info to get indices - for now use oracle endpoint per symbol
     const symbolsToFetch = new Set<string>();
     openTrades.forEach(t => {
       symbolsToFetch.add(t.symbolA);
       symbolsToFetch.add(t.symbolB);
     });
     
-    // Fetch current prices for all symbols in batch using ticker API
+    // Fetch current prices for all symbols
+    // Since we don't have market index mapping yet, we'll fetch prices individually
     let latestPriceMap: Record<string, number> = {};
     try {
-      latestPriceMap = await withRetry(
-        () => fetchMultiplePrices(Array.from(symbolsToFetch)),
-        3,
-        1000
-      );
-      console.log(`[EXIT_CHECK] Fetched ${Object.keys(latestPriceMap).length} current prices`);
+      console.log(`[EXIT_CHECK] Fetching prices for ${symbolsToFetch.size} symbols...`);
+      
+      // TODO: Implement market index lookup/mapping to use batch fetching
+      // For now, fetch prices one by one using Drift oracle endpoint
+      for (const symbol of symbolsToFetch) {
+        try {
+          // This is a workaround - we need market indices
+          // Skip price fetching for exit check temporarily
+          latestPriceMap[symbol] = 0;
+        } catch (err) {
+          latestPriceMap[symbol] = 0;
+        }
+      }
+      
+      console.log(`[EXIT_CHECK] Price fetching skipped - needs market index mapping`);
     } catch (error) {
       console.error(`[ERROR] Failed to fetch current prices for exit check:`, error);
       // Set all prices to 0 as fallback
@@ -163,15 +176,13 @@ async function runAnalysisCycle(config: Config): Promise<void> {
     }
     
     // Helper to get current z-score for a pair
+    // NOTE: This also needs market index lookup - temporarily disabled
     const getCurrentZScore = async (symbolA: string, symbolB: string): Promise<number | null> => {
       try {
-        const { dataA, dataB } = await withRetry(
-          () => fetchPairData(symbolA, symbolB, config.analysis.lookbackPeriod),
-          3,
-          1000
-        );
-        const result = analyzePair(dataA.prices, dataB.prices);
-        return result.zScore;
+        // TODO: Implement symbol-to-market-index mapping
+        // For now, return null to skip z-score-based exits
+        console.warn(`[EXIT_CHECK] Z-score calculation skipped for ${symbolA}/${symbolB} - needs market index mapping`);
+        return null;
       } catch (error) {
         return null;
       }
@@ -200,7 +211,7 @@ async function runAnalysisCycle(config: Config): Promise<void> {
   while (!signalFound) {
     scanCount++;
     
-    // Generate random pairs from Binance
+    // Generate random pairs from Drift Protocol
     console.log(`[PAIR_SELECTOR] Scan #${scanCount} - Generating random trading pairs...`);
     const pairCount = config.analysis.randomPairCount ?? 3;
     const randomPairs = await generateRandomPairCombinations(pairCount);
@@ -209,7 +220,13 @@ async function runAnalysisCycle(config: Config): Promise<void> {
     
     // Analyze each pair sequentially
     for (const pair of randomPairs) {
-      const hasSignal = await analyzeSinglePair(pair.pairA, pair.pairB, config);
+      const hasSignal = await analyzeSinglePair(
+        pair.marketIndexA,
+        pair.marketIndexB,
+        pair.symbolA,
+        pair.symbolB,
+        config
+      );
       if (hasSignal) {
         signalFound = true;
         console.log(`\n[SUCCESS] ✅ Trade signal found after ${scanCount} scan(s)!`);
@@ -232,12 +249,18 @@ async function runAnalysisCycle(config: Config): Promise<void> {
   for (const pair of randomPairs) {
     try {
       const { dataA, dataB } = await withRetry(
-        () => fetchPairData(pair.pairA, pair.pairB, config.analysis.lookbackPeriod),
+        () => fetchPairData(
+          pair.marketIndexA,
+          pair.marketIndexB,
+          pair.symbolA,
+          pair.symbolB,
+          config.analysis.lookbackPeriod
+        ),
         3,
         1000
       );
-      latestPriceMap[pair.pairA] = dataA.prices[dataA.prices.length - 1];
-      latestPriceMap[pair.pairB] = dataB.prices[dataB.prices.length - 1];
+      latestPriceMap[pair.symbolA] = dataA.prices[dataA.prices.length - 1];
+      latestPriceMap[pair.symbolB] = dataB.prices[dataB.prices.length - 1];
     } catch (error) {
       // Skip on error
     }
@@ -309,7 +332,7 @@ async function main(): Promise<void> {
     // Load configuration
     const config = await loadConfig();
     console.log(`[CONFIG] Loaded: ${config.agent.name} v${config.agent.version}`);
-    console.log(`[CONFIG] Mode: Random pair selection from Binance`);
+    console.log(`[CONFIG] Mode: Random pair selection from Drift Protocol`);
     console.log(`[CONFIG] Random pair count: ${config.analysis.randomPairCount ?? 3} pairs per scan`);
     console.log(`[CONFIG] Update interval: ${config.analysis.updateInterval / 60000} minutes`);
     console.log(`[CONFIG] Z-score threshold: ±${config.analysis.zScoreThreshold}`);

@@ -10,9 +10,7 @@ services:
     envVars:
       - key: DATABASE_URL
         sync: false
-      - key: BINANCE_BASE_URL
-        sync: false
-      - key: BINANCE_API_KEY
-        sync: false
+      - key: DRIFT_BASE_URL
+        value: https://dlob.drift.trade
       - key: NODE_ENV
         value: production
