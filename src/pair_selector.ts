@@ -1,0 +1,82 @@
+// Copilot: Randomly select trading pairs from Binance for pair-trading analysis
+
+import axios from 'axios';
+
+/**
+ * Interface for Binance exchange info symbol
+ */
+interface BinanceSymbol {
+  symbol: string;
+  status: string;
+  baseAsset: string;
+  quoteAsset: string;
+}
+
+/**
+ * Fetch all available USDC trading pairs from Binance
+ * @returns Array of symbol names (e.g., ['BTCUSDC', 'ETHUSDC', ...])
+ */
+async function fetchAvailableUSDCPairs(): Promise<string[]> {
+  try {
+    const response = await axios.get('https://api.binance.com/api/v3/exchangeInfo', {
+      timeout: 10000,
+    });
+
+    const symbols: BinanceSymbol[] = response.data.symbols;
+
+    // Filter for active USDC pairs only
+    const usdcPairs = symbols
+      .filter((s) => s.status === 'TRADING' && s.quoteAsset === 'USDC')
+      .map((s) => s.symbol);
+
+    return usdcPairs;
+  } catch (error) {
+    console.error('[PAIR_SELECTOR] Failed to fetch available pairs:', error);
+    throw new Error('Could not fetch trading pairs from Binance');
+  }
+}
+
+/**
+ * Randomly select N unique pairs from the available USDC pairs
+ * @param count - Number of pairs to select
+ * @returns Array of randomly selected pair symbols
+ */
+async function selectRandomPairs(count: number = 5): Promise<string[]> {
+  const allPairs = await fetchAvailableUSDCPairs();
+
+  // Shuffle and pick first N
+  const shuffled = allPairs.sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, count);
+}
+
+/**
+ * Generate random pair combinations for pair trading
+ * Picks 2*N random symbols and pairs them for correlation analysis
+ * @param pairCount - Number of pair combinations to generate
+ * @returns Array of pair combinations [{pairA, pairB, description}]
+ */
+export async function generateRandomPairCombinations(
+  pairCount: number = 2
+): Promise<Array<{ pairA: string; pairB: string; description: string }>> {
+  const selectedSymbols = await selectRandomPairs(pairCount * 2);
+
+  const pairs: Array<{ pairA: string; pairB: string; description: string }> = [];
+
+  for (let i = 0; i < pairCount; i++) {
+    const pairA = selectedSymbols[i * 2];
+    const pairB = selectedSymbols[i * 2 + 1];
+
+    if (pairA && pairB) {
+      pairs.push({
+        pairA,
+        pairB,
+        description: `Random pair: ${pairA}/${pairB}`,
+      });
+    }
+  }
+
+  console.log(`[PAIR_SELECTOR] Selected ${pairs.length} random pairs for analysis`);
+  pairs.forEach((p) => console.log(`  - ${p.pairA} / ${p.pairB}`));
+
+  return pairs;
+}

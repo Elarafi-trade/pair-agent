@@ -1,0 +1,32 @@
+{
+  "agent": {
+    "name": "PairAgent",
+    "description": "Autonomous pair-trading analysis agent",
+    "version": "1.0.0"
+  },
+  "pairs": [],
+  "analysis": {
+    "lookbackPeriod": 100,
+    "updateInterval": 3600000,
+    "zScoreThreshold": 2.0,
+    "correlationThreshold": 0.8,
+    "randomPairCount": 10
+  },
+  "exitConditions": {
+    "meanReversionThreshold": 0.5,
+    "stopLossPct": -5,
+    "takeProfitPct": 3,
+    "maxHoldingPeriodDays": 7
+  },
+  "apis": {
+    "binance": {
+      "baseUrl": "https://api.binance.com",
+      "interval": "1h"
+    }
+  },
+  "llm": {
+    "provider": "eliza",
+    "temperature": 0.7,
+    "maxTokens": 150
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "pair-agent",
+  "version": "1.0.0",
+  "description": "Autonomous pair-trading analysis agent using Eliza OS",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "eliza",
+    "pair-trading",
+    "crypto",
+    "trading-agent"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.2",
+    "mathjs": "^12.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "typescript": "^5.3.3"
+  }
+}
