@@ -8,15 +8,24 @@
   "analysis": {
     "lookbackPeriod": 100,
     "updateInterval": 3600000,
+    "exitCheckInterval": 300000,
     "zScoreThreshold": 2.0,
     "correlationThreshold": 0.8,
     "randomPairCount": 5
   },
   "exitConditions": {
     "meanReversionThreshold": 0.5,
-    "stopLossPct": -5,
-    "takeProfitPct": 3,
+    "stopLossPct": -3,
+    "takeProfitPct": 6,
     "maxHoldingPeriodDays": 7
+  },
+  "riskManagement": {
+    "maxConcurrentTrades": 3,
+    "maxCorrelatedTrades": 2,
+    "maxPortfolioRisk": 15,
+    "minCashReserve": 0.30,
+    "defaultLeverage": 5,
+    "maxLeverage": 10
   },
   "apis": {
     "drift": {

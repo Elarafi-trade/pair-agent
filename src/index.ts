@@ -40,6 +40,7 @@ interface Config {
   analysis: {
     lookbackPeriod: number;
     updateInterval: number;
+    exitCheckInterval?: number; // 🆕 Separate interval for exit monitoring (default: 5 minutes)
     zScoreThreshold: number;
     correlationThreshold: number;
     randomPairCount?: number;
@@ -49,6 +50,14 @@ interface Config {
     stopLossPct: number;
     takeProfitPct: number;
     maxHoldingPeriodDays: number;
+  };
+  riskManagement?: {
+    maxConcurrentTrades: number;
+    maxCorrelatedTrades: number;
+    maxPortfolioRisk: number;
+    minCashReserve: number;
+    defaultLeverage: number;
+    maxLeverage: number;
   };
   apis: {
     drift: {
@@ -109,6 +118,27 @@ async function analyzeSinglePair(
     if (shouldTrade) {
       console.log(`[SIGNAL] ⚡ Trade signal detected!`);
       
+      // Check risk management limits before executing
+      const openTrades = getOpenTrades();
+      const maxTrades = config.riskManagement?.maxConcurrentTrades ?? 5;
+      
+      if (openTrades.length >= maxTrades) {
+        console.log(`[RISK] ⚠️ Max concurrent trades reached (${openTrades.length}/${maxTrades}). Skipping trade.`);
+        return false;
+      }
+      
+      // Check if we already have a correlated trade open
+      const maxCorrelated = config.riskManagement?.maxCorrelatedTrades ?? 2;
+      const correlatedCount = openTrades.filter(t =>
+        t.symbolA === symbolA || t.symbolB === symbolB ||
+        t.symbolA === symbolB || t.symbolB === symbolA
+      ).length;
+      
+      if (correlatedCount >= maxCorrelated) {
+        console.log(`[RISK] ⚠️ Too many correlated trades (${correlatedCount}/${maxCorrelated}). Skipping ${symbolA}/${symbolB}.`);
+        return false;
+      }
+      
       // Execute simulated trade
       const currentPriceA = dataA.prices[dataA.prices.length - 1];
       const currentPriceB = dataB.prices[dataB.prices.length - 1];
@@ -124,6 +154,96 @@ async function analyzeSinglePair(
     console.error(`[ERROR] Failed to analyze ${symbolA}/${symbolB}:`, error);
     return false; // Error = no signal
   }
+}
+
+/**
+ * Perform quick exit condition check for all open trades
+ * Lightweight version for frequent monitoring (every 5 minutes)
+ */
+async function performQuickExitCheck(config: Config): Promise<number> {
+  const openTrades = getOpenTrades();
+  
+  if (openTrades.length === 0) {
+    return 0;
+  }
+  
+  const initialCount = openTrades.length;
+  console.log(`\n[EXIT_MONITOR] 🔍 Quick check: ${openTrades.length} open position(s) at ${new Date().toLocaleTimeString()}`);
+  
+  // Build list of unique symbols in open trades
+  const symbolsToFetch = new Set<string>();
+  openTrades.forEach(t => {
+    symbolsToFetch.add(t.symbolA);
+    symbolsToFetch.add(t.symbolB);
+  });
+  
+  // Fetch current prices for all symbols
+  let latestPriceMap: Record<string, number> = {};
+  try {
+    for (const symbol of symbolsToFetch) {
+      try {
+        const marketIndex = await getMarketIndex(symbol);
+        if (marketIndex !== undefined) {
+          const price = await fetchCurrentPrice(marketIndex, symbol);
+          latestPriceMap[symbol] = price;
+        } else {
+          latestPriceMap[symbol] = 0;
+        }
+      } catch (err: any) {
+        console.error(`[EXIT_MONITOR] Failed to fetch ${symbol}: ${err.message}`);
+        latestPriceMap[symbol] = 0;
+      }
+    }
+  } catch (error) {
+    console.error(`[EXIT_MONITOR] Price fetch error:`, error);
+    return 0;
+  }
+  
+  // Helper to get current z-score for a pair
+  const getCurrentZScore = async (symbolA: string, symbolB: string): Promise<number | null> => {
+    try {
+      const indexA = await getMarketIndex(symbolA);
+      const indexB = await getMarketIndex(symbolB);
+      
+      if (indexA === undefined || indexB === undefined) {
+        return null;
+      }
+      
+      const { dataA, dataB } = await withRetry(
+        () => fetchPairData(indexA, indexB, symbolA, symbolB, 100),
+        2,
+        1000
+      );
+      
+      const analysis = analyzePair(dataA.prices, dataB.prices);
+      return analysis.zScore;
+    } catch (error: any) {
+      console.error(`[EXIT_MONITOR] Z-score calc failed for ${symbolA}/${symbolB}: ${error.message}`);
+      return null;
+    }
+  };
+  
+  await checkExitConditions(
+    (symbol) => latestPriceMap[symbol] ?? 0,
+    getCurrentZScore,
+    config.exitConditions ? {
+      meanReversionThreshold: config.exitConditions.meanReversionThreshold,
+      stopLossPct: config.exitConditions.stopLossPct,
+      takeProfitPct: config.exitConditions.takeProfitPct,
+      maxHoldingPeriodMs: config.exitConditions.maxHoldingPeriodDays * 24 * 60 * 60 * 1000,
+    } : DEFAULT_EXIT_CONDITIONS
+  );
+  
+  const remainingTrades = getOpenTrades();
+  const closedCount = initialCount - remainingTrades.length;
+  
+  if (closedCount > 0) {
+    console.log(`[EXIT_MONITOR] ⚠️ CLOSED ${closedCount} position(s)! ${remainingTrades.length} remain.`);
+  } else {
+    console.log(`[EXIT_MONITOR] ✅ All positions within limits. ${remainingTrades.length} still open.`);
+  }
+  
+  return closedCount;
 }
 
 /**
@@ -404,7 +524,7 @@ async function main(): Promise<void> {
     // Run first cycle immediately
     await runAnalysisCycle(config);
     
-    // Schedule periodic execution
+    // Schedule main analysis cycle (hourly by default)
     setInterval(async () => {
       try {
         await runAnalysisCycle(config);
@@ -413,7 +533,24 @@ async function main(): Promise<void> {
       }
     }, config.analysis.updateInterval);
     
-    console.log(`[AGENT] Running continuously. Press Ctrl+C to stop.`);
+    // 🔥 NEW: Schedule frequent exit monitoring (every 5 minutes by default)
+    // This runs independently to catch stop-losses quickly
+    const EXIT_CHECK_INTERVAL = config.analysis.exitCheckInterval ?? (5 * 60 * 1000); // Default: 5 minutes
+    setInterval(async () => {
+      try {
+        // Only run if there are open trades
+        if (getOpenTrades().length > 0) {
+          await performQuickExitCheck(config);
+        }
+      } catch (error) {
+        console.error('[ERROR] Exit monitoring failed:', error);
+      }
+    }, EXIT_CHECK_INTERVAL);
+    
+    console.log(`[AGENT] Running continuously with:`);
+    console.log(`  - Main analysis cycle: Every ${config.analysis.updateInterval / 60000} minutes`);
+    console.log(`  - Exit monitoring: Every ${EXIT_CHECK_INTERVAL / 60000} minutes`);
+    console.log(`  Press Ctrl+C to stop.\n`);
     
   } catch (error) {
     console.error('[FATAL] Agent startup failed:', error);

@@ -420,12 +420,12 @@ export interface ExitConditions {
 }
 
 /**
- * Default exit conditions
+ * Default exit conditions (optimized for profitability)
  */
 export const DEFAULT_EXIT_CONDITIONS: ExitConditions = {
   meanReversionThreshold: 0.5,
-  stopLossPct: -5,
-  takeProfitPct: 3,
+  stopLossPct: -3,        // Reduced risk from -5%
+  takeProfitPct: 6,       // Increased reward from 3%
   maxHoldingPeriodMs: 7 * 24 * 60 * 60 * 1000, // 7 days
 };
 
