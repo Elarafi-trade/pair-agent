@@ -33,7 +33,6 @@ import {
   insertTrade,
   closeTrade as dbCloseTrade,
   updateTradePnL,
-  getOpenTrades as dbGetOpenTrades,
   getAllTrades,
   TradeRecord as DBTradeRecord,
   initializeTables,
