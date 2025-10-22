@@ -11,10 +11,11 @@ const ENV_BASE = process.env.BINANCE_BASE_URL;
 const BINANCE_BASE_URLS = ENV_BASE
   ? [ENV_BASE]
   : [
-      'https://api.binance.com/api/v3',
-      'https://api.binance.us/api/v3',
-      'https://data-api.binance.vision/api/v3',
-    ];
+    'https://api.binance.me',
+    'https://api.binance.com/api/v3',
+    'https://api.binance.us/api/v3',
+    'https://data-api.binance.vision/api/v3',
+  ];
 
 async function getWithFallback<T = any>(path: string): Promise<T> {
   let lastError: any;
