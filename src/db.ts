@@ -82,11 +82,11 @@ export async function initializeTables() {
         status VARCHAR(20) NOT NULL DEFAULT 'open',
         close_timestamp TIMESTAMPTZ,
         close_reason TEXT,
-        close_pnl DECIMAL(10, 4),
-        upnl_pct DECIMAL(10, 4),
-        volatility DECIMAL(10, 4),
-        half_life DECIMAL(10, 4),
-        sharpe DECIMAL(10, 4),
+        close_pnl DECIMAL(15, 4),
+        upnl_pct DECIMAL(15, 4),
+        volatility DECIMAL(15, 4),
+        half_life DECIMAL(15, 4),
+        sharpe DECIMAL(15, 4),
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
     `;

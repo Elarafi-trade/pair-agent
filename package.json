@@ -9,6 +9,8 @@
     "start": "node dist/server.js",
     "smoke:db": "node scripts/db_smoke.mjs",
     "migrate:schema": "node scripts/fix_performance_schema.mjs",
+    "migrate:trades": "node scripts/fix_trades_schema.mjs",
+    "cleanup:pnl": "node scripts/cleanup_extreme_pnl.mjs",
     "dev": "tsc --watch",
     "clean": "rm -rf dist"
   },

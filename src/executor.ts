@@ -26,11 +26,19 @@ export async function updateUPnLForOpenTrades(getLatestPrice: (symbol: string) =
       const shortRet = (trade.shortPrice - currentShort) / trade.shortPrice;
       
       // Pair trading PnL is longRet + shortRet
-      const newUpnl = (longRet + shortRet) * 100;
+      let newUpnl = (longRet + shortRet) * 100;
       
-      // Validate PnL is reasonable (should typically be < ±50% in pair trading)
-      if (Math.abs(newUpnl) > 100) {
-        console.warn(`[EXECUTOR] Suspicious PnL for ${trade.pair}: ${newUpnl.toFixed(2)}% - check prices: long ${trade.longAsset} ${currentLong.toFixed(4)}, short ${trade.shortAsset} ${currentShort.toFixed(4)}`);
+      // Validate and cap PnL to prevent extreme values from bad price data
+      // Typical pair trading PnL should be < ±50% per trade
+      // Cap at ±500% to handle extreme but plausible scenarios
+      if (Math.abs(newUpnl) > 500) {
+        console.warn(`[EXECUTOR] ⚠️ EXTREME PnL for ${trade.pair}: ${newUpnl.toFixed(2)}%`);
+        console.warn(`[EXECUTOR] Prices: long ${trade.longAsset} entry=${trade.longPrice.toFixed(6)} current=${currentLong.toFixed(6)}`);
+        console.warn(`[EXECUTOR] Prices: short ${trade.shortAsset} entry=${trade.shortPrice.toFixed(6)} current=${currentShort.toFixed(6)}`);
+        console.warn(`[EXECUTOR] Capping PnL at ±500% - likely bad price data!`);
+        newUpnl = Math.sign(newUpnl) * 500; // Cap at ±500%
+      } else if (Math.abs(newUpnl) > 100) {
+        console.warn(`[EXECUTOR] High PnL for ${trade.pair}: ${newUpnl.toFixed(2)}% - verify prices: long ${trade.longAsset} ${currentLong.toFixed(4)}, short ${trade.shortAsset} ${currentShort.toFixed(4)}`);
       }
       
       trade.upnlPct = newUpnl;
@@ -535,7 +543,16 @@ export async function closeTrade(
   }
 
   const closeTimestamp = new Date().toISOString();
-  const closePnL = trade.upnlPct ?? 0;
+  let closePnL = trade.upnlPct ?? 0;
+  
+  // Cap PnL to prevent database overflow and catch bad price data
+  // Pair trading should rarely exceed ±100% per trade
+  // Cap at ±500% for extreme scenarios
+  if (Math.abs(closePnL) > 500) {
+    console.warn(`[EXECUTOR] ⚠️ EXTREME close PnL for ${trade.pair}: ${closePnL.toFixed(2)}%`);
+    console.warn(`[EXECUTOR] Capping at ±500% - likely bad price data!`);
+    closePnL = Math.sign(closePnL) * 500;
+  }
 
   // Update in database
   if (trade.id) {

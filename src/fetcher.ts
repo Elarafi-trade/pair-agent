@@ -223,49 +223,82 @@ export async function withRetry<T>(
 /**
  * Fetch current oracle price for a Drift market
  * @param marketIndex - Market index (e.g., 0 for SOL-PERP)
- * @returns Current oracle price
+ * @param symbol - Market symbol (e.g., 'SOL-PERP') - preferred method
+ * @returns Current oracle price (scaled to decimal)
  */
 export async function fetchCurrentPrice(marketIndex: number, symbol?: string): Promise<number> {
   try {
-    // Prefer DLOB L2 snapshot with oracle field; fallback to Data API TWAP
-    const l2 = await schedule(() => axios.get(`${DRIFT_DLOB_BASE}/l2`, {
-      params: { marketIndex, includeOracle: true, depth: 1 },
-      timeout: 8000,
-    }).then(r => r.data).catch(() => null));
+    // PREFER: Try DLOB L2 by marketName first (more reliable than marketIndex)
+    if (symbol) {
+      try {
+        const l2 = await schedule(() => axios.get(`${DRIFT_DLOB_BASE}/l2`, {
+          params: { marketName: symbol, includeOracle: true, depth: 1 },
+          timeout: 8000,
+        }).then(r => r.data));
 
-    const oracleFromL2 = l2?.oracle ?? l2?.oracleData?.price;
-    if (typeof oracleFromL2 === 'number' && Number.isFinite(oracleFromL2) && oracleFromL2 > 0) {
-      return oracleFromL2;
+        // Oracle prices from DLOB are in 1e6 precision (need to divide by 1,000,000)
+        let oracleRaw = l2?.oracle ?? l2?.oracleData?.price;
+        if (typeof oracleRaw === 'string') {
+          oracleRaw = Number(oracleRaw);
+        }
+        
+        if (typeof oracleRaw === 'number' && Number.isFinite(oracleRaw) && oracleRaw > 0) {
+          const oraclePrice = oracleRaw / 1e6; // Convert from 1e6 precision to decimal
+          return oraclePrice;
+        }
+      } catch (err) {
+        // Continue to fallbacks
+      }
     }
 
-    // Fallback to Data API fundingRates if symbol is provided
+    // FALLBACK 1: Try DLOB L2 by marketIndex
+    try {
+      const l2 = await schedule(() => axios.get(`${DRIFT_DLOB_BASE}/l2`, {
+        params: { marketIndex, includeOracle: true, depth: 1 },
+        timeout: 8000,
+      }).then(r => r.data));
+
+      // Oracle prices from DLOB are in 1e6 precision
+      let oracleRaw = l2?.oracle ?? l2?.oracleData?.price;
+      if (typeof oracleRaw === 'string') {
+        oracleRaw = Number(oracleRaw);
+      }
+      
+      if (typeof oracleRaw === 'number' && Number.isFinite(oracleRaw) && oracleRaw > 0) {
+        const oraclePrice = oracleRaw / 1e6; // Convert from 1e6 precision to decimal
+        return oraclePrice;
+      }
+    } catch (err) {
+      // Continue to next fallback
+    }
+
+    // FALLBACK 2: Data API fundingRates (TWAP)
     if (symbol) {
-      console.log(`[FETCHER] Oracle unavailable for ${symbol}, falling back to Data API...`);
       const { prices } = await fetchOracleTwapSeries(symbol, 1);
       if (prices.length > 0 && prices[0] > 0) {
         return prices[0];
       }
-
-      // Secondary fallback: try market_cache's currentPrice if available (may use cached markets)
-      try {
-        const cached = await getCachedMarketPrice(symbol);
-        if (typeof cached === 'number' && Number.isFinite(cached) && cached > 0) {
-          console.log(`[FETCHER] Using cached market price for ${symbol}: ${cached}`);
-          return cached;
-        }
-      } catch {}
     }
 
-    throw new Error('Oracle price unavailable and Data API fallback failed');
+    // FALLBACK 3: Market cache (static prices from /stats/markets/prices)
+    if (symbol) {
+      const cached = await getCachedMarketPrice(symbol);
+      if (typeof cached === 'number' && Number.isFinite(cached) && cached > 0) {
+        return cached;
+      }
+    }
+
+    throw new Error('All price sources unavailable');
   } catch (error) {
-    console.error(`[FETCHER] Failed to fetch current price for market ${marketIndex} (${symbol ?? 'unknown'}):`, error);
-    throw new Error(`Could not fetch price for market ${marketIndex}`);
+    console.error(`[FETCHER] Failed to fetch current price for ${symbol ?? `market ${marketIndex}`}:`, error);
+    throw new Error(`Could not fetch price for ${symbol ?? `market ${marketIndex}`}`);
   }
 }
 
 /**
  * Fetch current oracle price by market symbol when index is unavailable.
  * Attempts DLOB /l2?marketName=symbol, then TWAP, then cached market price.
+ * @returns Current oracle price (scaled to decimal)
  */
 export async function fetchCurrentPriceBySymbol(symbol: string): Promise<number> {
   try {
@@ -275,18 +308,24 @@ export async function fetchCurrentPriceBySymbol(symbol: string): Promise<number>
       timeout: 8000,
     }).then(r => r.data).catch(() => null));
 
-    const oracleFromL2 = l2?.oracle ?? l2?.oracleData?.price;
-    if (typeof oracleFromL2 === 'number' && Number.isFinite(oracleFromL2) && oracleFromL2 > 0) {
-      return oracleFromL2;
+    // Oracle prices from DLOB are in 1e6 precision (need to divide by 1,000,000)
+    let oracleRaw = l2?.oracle ?? l2?.oracleData?.price;
+    if (typeof oracleRaw === 'string') {
+      oracleRaw = Number(oracleRaw);
+    }
+    
+    if (typeof oracleRaw === 'number' && Number.isFinite(oracleRaw) && oracleRaw > 0) {
+      const oraclePrice = oracleRaw / 1e6; // Convert from 1e6 precision to decimal
+      return oraclePrice;
     }
 
-    // Fallback to Data API TWAP
+    // Fallback to Data API TWAP (already returns decimal prices)
     const { prices } = await fetchOracleTwapSeries(symbol, 1);
     if (prices.length > 0 && prices[0] > 0) {
       return prices[0];
     }
 
-    // Fallback to cached market price
+    // Fallback to cached market price (already decimal)
     const cached = await getCachedMarketPrice(symbol);
     if (typeof cached === 'number' && Number.isFinite(cached) && cached > 0) {
       return cached;
