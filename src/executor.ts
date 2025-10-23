@@ -189,6 +189,93 @@ export async function loadTradeHistory(): Promise<number> {
 }
 
 /**
+ * Calculate Kelly position size based on historical performance
+ * Kelly fraction = (p × b - q) / b
+ * where p = win probability, b = win/loss ratio, q = 1 - p
+ * @param winRate - Historical win rate (0-1)
+ * @param avgWin - Average winning trade return (%)
+ * @param avgLoss - Average losing trade return (%) - should be negative
+ * @param kellyFraction - Fractional Kelly (default 0.25 = quarter Kelly)
+ * @returns Position size as fraction of capital (0-1)
+ */
+export function calculateKellySize(
+  winRate: number,
+  avgWin: number,
+  avgLoss: number,
+  kellyFraction: number = 0.25
+): number {
+  // Validate inputs
+  if (winRate <= 0 || winRate >= 1) return 0.1; // Default to 10% if no history
+  if (avgWin <= 0) return 0.1;
+  if (avgLoss >= 0) return 0.1; // Loss should be negative
+  
+  const p = winRate;
+  const q = 1 - p;
+  const b = avgWin / Math.abs(avgLoss); // Win/loss ratio
+  
+  // Full Kelly formula
+  const fullKelly = (p * b - q) / b;
+  
+  // Apply fractional Kelly for safety (typically 1/4 to 1/2)
+  const fractionalKelly = fullKelly * kellyFraction;
+  
+  // Clamp between 0% and 50% (never risk more than half capital on one trade)
+  return Math.max(0, Math.min(0.5, fractionalKelly));
+}
+
+/**
+ * Calculate position size adjusted for volatility
+ * Lower volatility = larger position, higher volatility = smaller position
+ * @param baseSize - Base position size (from Kelly or fixed)
+ * @param currentVol - Current volatility of the pair
+ * @param targetVol - Target volatility (default 50%)
+ * @returns Adjusted position size
+ */
+export function adjustSizeForVolatility(
+  baseSize: number,
+  currentVol: number,
+  targetVol: number = 50
+): number {
+  if (currentVol <= 0) return baseSize;
+  
+  // Scale inversely with volatility
+  const volRatio = targetVol / currentVol;
+  const adjustedSize = baseSize * volRatio;
+  
+  // Clamp between 10% and 100% of base size
+  return Math.max(baseSize * 0.1, Math.min(baseSize, adjustedSize));
+}
+
+/**
+ * Check if trading conditions are favorable (market regime, timing, etc.)
+ * @param config - Configuration object with timing and filter settings
+ * @returns True if conditions are good for trading
+ */
+export function checkTradingConditions(config?: {
+  bestExecutionHours?: number[];
+  avoidHighVolatility?: boolean;
+  checkMarketRegime?: boolean;
+}): boolean {
+  if (!config) return true;
+  
+  // Check if current hour is in best execution hours
+  if (config.bestExecutionHours && config.bestExecutionHours.length > 0) {
+    const currentHour = new Date().getUTCHours();
+    if (!config.bestExecutionHours.includes(currentHour)) {
+      console.log(`[EXECUTOR] Skipping trade - current hour ${currentHour} not in best execution hours`);
+      return false;
+    }
+  }
+  
+  // Additional checks can be added here for:
+  // - High volatility periods (check VIX or crypto fear index)
+  // - Market regime (trending vs mean-reverting)
+  // - Known high-impact events (FOMC, etc.)
+  
+  return true;
+}
+
+/**
  * Simulate a pair trade execution
  * In production, integrate with ethers.js or exchange API
  * 
