@@ -74,9 +74,11 @@ export function calculatePerformanceMetrics(trades: TradeRecord[]): PerformanceM
   const losingTrades = closedTrades.filter(t => (t.closePnL ?? 0) <= 0).length;
   const winRate = (winningTrades / totalTrades) * 100;
 
-  // Returns calculation (without leverage = sum of PnL %, with leverage = assume 10x)
+  // Returns calculation (without leverage = sum of PnL %, with leverage from config)
+  // Note: Using 2x leverage from eliza.config.json (defaultLeverage: 2)
+  const LEVERAGE_MULTIPLIER = 2; // Changed from 10x to match config
   const totalReturnWithoutLeverage = closedTrades.reduce((sum, t) => sum + (t.closePnL ?? 0), 0);
-  const totalReturnWithLeverage = totalReturnWithoutLeverage * 10; // Assume 10x leverage
+  const totalReturnWithLeverage = totalReturnWithoutLeverage * LEVERAGE_MULTIPLIER;
 
   // Time-based metrics
   const firstTradeTime = Math.min(...closedTrades.map(t => t.timestamp));
@@ -179,7 +181,7 @@ export function formatPerformanceReport(metrics: PerformanceMetrics, openTradesC
   Performance Metrics
   ─────────────────────────────────────────────────────────
   APY:                       ${metrics.apy.toFixed(2)}%${apyNote}
-  Total Return (10x lev):    ${metrics.totalReturnWithLeverage.toFixed(2)}%
+  Total Return (2x lev):     ${metrics.totalReturnWithLeverage.toFixed(2)}%
   Total Return (no lev):     ${metrics.totalReturnWithoutLeverage.toFixed(2)}%
   Profit Factor:             ${metrics.profitFactor.toFixed(2)}
   
