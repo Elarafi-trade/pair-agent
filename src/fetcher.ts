@@ -46,7 +46,8 @@ async function fetchOracleTwapSeries(
   try {
     // Data API: GET /fundingRates?marketName=SOL-PERP
     // Use oraclePriceTwap (1e6 precision) as proxy for historical price
-    const url = `${DRIFT_DATA_API_BASE}/fundingRates`;
+    // NOTE: API requires trailing slash in URL path
+    const url = `${DRIFT_DATA_API_BASE}/fundingRates/`;
     const response = await schedule(() => axios.get(url, {
       params: { marketName: marketName },
       timeout: 15000,
