@@ -248,6 +248,7 @@ export async function fetchCurrentPrice(marketIndex: number, symbol?: string): P
         }
       } catch (err) {
         // Continue to fallbacks
+        console.log(`[FETCHER] DLOB fetch by symbol ${symbol} failed, trying fallbacks...`);
       }
     }
 
@@ -270,6 +271,7 @@ export async function fetchCurrentPrice(marketIndex: number, symbol?: string): P
       }
     } catch (err) {
       // Continue to next fallback
+      console.log(`[FETCHER] DLOB fetch by marketIndex ${marketIndex} failed, trying fallbacks...`);
     }
 
     // FALLBACK 2: Data API fundingRates (TWAP)
