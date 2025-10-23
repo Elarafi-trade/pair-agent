@@ -88,14 +88,30 @@ export function calculatePerformanceMetrics(trades: TradeRecord[]): PerformanceM
   // Cap APY calculation to prevent infinity when time period is very small
   const totalReturnDecimal = totalReturnWithLeverage / 100;
   let apy = 0;
-  if (totalDays > 0) {
-    const rawApy = (Math.pow(1 + totalReturnDecimal, 365 / totalDays) - 1) * 100;
-    // Cap at ±999,999% to prevent database overflow
-    apy = Math.max(-999999, Math.min(999999, rawApy));
-    // Set to 0 if result is not finite (Infinity, -Infinity, NaN)
-    if (!Number.isFinite(apy)) {
-      apy = 0;
+  
+  // Require minimum 3 days of data OR 5+ trades to calculate meaningful APY
+  // Short time periods create unrealistic extrapolations
+  if (totalDays >= 3 || totalTrades >= 5) {
+    if (totalDays >= 1) {
+      const rawApy = (Math.pow(1 + totalReturnDecimal, 365 / totalDays) - 1) * 100;
+      // Cap at ±999,999% to prevent database overflow
+      apy = Math.max(-999999, Math.min(999999, rawApy));
+      // Set to 0 if result is not finite (Infinity, -Infinity, NaN)
+      if (!Number.isFinite(apy)) {
+        apy = 0;
+      }
+    } else {
+      // For periods < 1 day, use simple annualized rate without compounding
+      apy = totalDays > 0 ? (totalReturnDecimal * (365 / totalDays)) * 100 : 0;
+      // Still cap for safety
+      apy = Math.max(-999999, Math.min(999999, apy));
+      if (!Number.isFinite(apy)) {
+        apy = 0;
+      }
     }
+  } else {
+    // Not enough data - set APY to 0 and let it calculate once we have sufficient history
+    apy = 0;
   }
 
   // Average returns per day
@@ -138,26 +154,31 @@ export function calculatePerformanceMetrics(trades: TradeRecord[]): PerformanceM
 /**
  * Format performance metrics for console display
  * @param metrics - Performance metrics object
+ * @param openTradesCount - Number of currently open trades (optional)
  * @returns Formatted string
  */
-export function formatPerformanceReport(metrics: PerformanceMetrics): string {
+export function formatPerformanceReport(metrics: PerformanceMetrics, openTradesCount?: number): string {
   const daysSinceStart = (Date.now() - metrics.startDate) / (1000 * 60 * 60 * 24);
+  const totalAllTrades = metrics.totalTrades + (openTradesCount ?? 0);
+  const apyNote = metrics.apy === 0 && metrics.totalTrades < 5 && daysSinceStart < 3 
+    ? ' (insufficient data)' 
+    : '';
   
   return `
 ╔═══════════════════════════════════════════════════════════╗
 ║              📊 AGENT PERFORMANCE PROFILE                 ║
 ╚═══════════════════════════════════════════════════════════╝
 
-  Trade Signal Metrics
+  Trade Signal Metrics (Closed Trades Only)
   ─────────────────────────────────────────────────────────
-  Total Trades:              ${metrics.totalTrades}
+  Total All Trades:          ${totalAllTrades} (${openTradesCount ?? 0} open, ${metrics.totalTrades} closed)
   Winning Trades:            ${metrics.winningTrades}
   Losing Trades:             ${metrics.losingTrades}
   Win Rate:                  ${metrics.winRate.toFixed(2)}%
 
   Performance Metrics
   ─────────────────────────────────────────────────────────
-  APY:                       ${metrics.apy.toFixed(2)}%
+  APY:                       ${metrics.apy.toFixed(2)}%${apyNote}
   Total Return (10x lev):    ${metrics.totalReturnWithLeverage.toFixed(2)}%
   Total Return (no lev):     ${metrics.totalReturnWithoutLeverage.toFixed(2)}%
   Profit Factor:             ${metrics.profitFactor.toFixed(2)}
@@ -178,9 +199,11 @@ export function formatPerformanceReport(metrics: PerformanceMetrics): string {
 /**
  * Save performance metrics to database
  * @param metrics - Performance metrics object
+ * @param openTradesCount - Number of currently open trades (optional, will be calculated if not provided)
  */
 export async function savePerformanceMetrics(
-  metrics: PerformanceMetrics
+  metrics: PerformanceMetrics,
+  openTradesCount?: number
 ): Promise<void> {
   try {
     await ensureDbInitialized();
@@ -195,7 +218,7 @@ export async function savePerformanceMetrics(
     // Convert to database format
     const dbMetrics = {
       totalTrades: metrics.totalTrades,
-      openTrades: 0, // Will be calculated from current trades
+      openTrades: openTradesCount ?? 0,
       closedTrades: metrics.totalTrades,
       winningTrades: metrics.winningTrades,
       losingTrades: metrics.losingTrades,

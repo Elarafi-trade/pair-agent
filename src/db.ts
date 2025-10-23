@@ -284,8 +284,18 @@ export async function getClosedTrades(): Promise<TradeRecord[]> {
 
 /**
  * Save performance metrics (upsert latest record)
+ * 
+ * Strategy: Keep only the latest performance metrics record by deleting all old ones
+ * before inserting the new one. This ensures:
+ * - Single source of truth for current performance
+ * - No accumulation of historical snapshots
+ * - Clean database state
  */
 export async function savePerformanceMetrics(metrics: PerformanceMetrics) {
+  // Delete all existing performance metrics (we only keep the latest)
+  await sql`DELETE FROM performance_metrics`;
+  
+  // Insert new record
   await sql`
     INSERT INTO performance_metrics (
       total_trades, open_trades, closed_trades, winning_trades, losing_trades,

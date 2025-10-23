@@ -150,10 +150,11 @@ async function analyzeSinglePair(
       // Update performance metrics immediately after trade execution
       if (trade) {
         const allTrades = getTradeHistory();
+        const openTradesCount = getOpenTrades().length;
         const performanceMetrics = calculatePerformanceMetrics(allTrades);
         if (performanceMetrics.totalTrades > 0) {
           console.log(`[SIGNAL] Updating performance metrics after new trade...`);
-          await savePerformanceMetrics(performanceMetrics);
+          await savePerformanceMetrics(performanceMetrics, openTradesCount);
         }
       }
       
@@ -265,10 +266,11 @@ async function performQuickExitCheck(config: Config): Promise<number> {
     
     // Update performance metrics when trades are closed
     const allTrades = getTradeHistory();
+    const openTradesCount = remainingTrades.length;
     const performanceMetrics = calculatePerformanceMetrics(allTrades);
     if (performanceMetrics.totalTrades > 0) {
       console.log(`[EXIT_MONITOR] Updating performance metrics...`);
-      await savePerformanceMetrics(performanceMetrics);
+      await savePerformanceMetrics(performanceMetrics, openTradesCount);
     }
   } else {
     console.log(`[EXIT_MONITOR] ✅ All positions within limits. ${remainingTrades.length} still open.`);
@@ -493,11 +495,12 @@ async function runAnalysisCycle(config: Config): Promise<void> {
 
   // Calculate and display performance metrics
   const allTrades = getTradeHistory();
+  const openTradesCount = getOpenTrades().length;
   const performanceMetrics = calculatePerformanceMetrics(allTrades);
 
   if (performanceMetrics.totalTrades > 0) {
-    console.log(formatPerformanceReport(performanceMetrics));
-    await savePerformanceMetrics(performanceMetrics);
+    console.log(formatPerformanceReport(performanceMetrics, openTradesCount));
+    await savePerformanceMetrics(performanceMetrics, openTradesCount);
   }
 
   console.log(`\n${'='.repeat(60)}`);
@@ -543,10 +546,11 @@ async function main(): Promise<void> {
 
     // Display performance metrics at startup
     const allTradesAtStartup = getTradeHistory();
+    const openTradesAtStartup = getOpenTrades().length;
     if (allTradesAtStartup.length > 0) {
       const startupMetrics = calculatePerformanceMetrics(allTradesAtStartup);
       if (startupMetrics.totalTrades > 0) {
-        console.log(formatPerformanceReport(startupMetrics));
+        console.log(formatPerformanceReport(startupMetrics, openTradesAtStartup));
       }
     }
 

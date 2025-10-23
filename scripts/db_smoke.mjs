@@ -26,7 +26,7 @@ async function main() {
   const latest5 = trades.slice(0, 5);
   console.log(`DB smoke: total trades=${trades.length}; showing ${latest5.length}`);
   for (const t of latest5) {
-    console.log(`- ${t.pairA}/${t.pairB} status=${t.status} opened=${t.opened_at}`);
+    console.log(`- ${t.pair} | status=${t.status} | opened=${t.timestamp} | upnl=${t.upnlPct ?? 0}%`);
   }
 
   console.log('DB smoke: SUCCESS');
