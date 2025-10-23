@@ -43,6 +43,7 @@ interface Config {
     updateInterval: number;
     exitCheckInterval?: number; // 🆕 Separate interval for exit monitoring (default: 5 minutes)
     maxScansPerCycle?: number;   // 🆕 Cap on scan iterations per cycle to avoid infinite loops
+    scanDelayMs?: number;         // 🆕 Delay between pair scans to avoid API rate limits (default: 3000ms)
     zScoreThreshold: number;
     correlationThreshold: number;
     randomPairCount?: number;
@@ -410,6 +411,13 @@ async function runAnalysisCycle(config: Config): Promise<void> {
         console.log(`\n[SUCCESS] ✅ Trade signal found after ${scanCount} scan(s)!`);
         break; // Exit the for loop
       }
+      
+      // Add delay between pair scans to avoid API rate limits
+      const delayMs = config.analysis.scanDelayMs ?? 3000;
+      if (randomPairs.indexOf(pair) < randomPairs.length - 1) { // Don't delay after last pair
+        console.log(`[SCAN] Waiting ${delayMs}ms before next pair...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
     }
 
     if (!signalFound) {
@@ -419,8 +427,9 @@ async function runAnalysisCycle(config: Config): Promise<void> {
         break;
       }
       console.log(`\n[SCAN] No signals found in scan #${scanCount}. Generating new random pairs...\n`);
-      // Small delay to avoid hammering the API
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Delay before next scan cycle to avoid hammering the API
+      const delayMs = config.analysis.scanDelayMs ?? 3000;
+      await new Promise(resolve => setTimeout(resolve, delayMs));
     }
   }
 
