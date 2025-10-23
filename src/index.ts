@@ -145,7 +145,18 @@ async function analyzeSinglePair(
       const currentPriceA = dataA.prices[dataA.prices.length - 1];
       const currentPriceB = dataB.prices[dataB.prices.length - 1];
 
-      await executeTrade(symbolA, symbolB, result, currentPriceA, currentPriceB);
+      const trade = await executeTrade(symbolA, symbolB, result, currentPriceA, currentPriceB);
+      
+      // Update performance metrics immediately after trade execution
+      if (trade) {
+        const allTrades = getTradeHistory();
+        const performanceMetrics = calculatePerformanceMetrics(allTrades);
+        if (performanceMetrics.totalTrades > 0) {
+          console.log(`[SIGNAL] Updating performance metrics after new trade...`);
+          await savePerformanceMetrics(performanceMetrics);
+        }
+      }
+      
       return true; // Signal found
     } else {
       console.log(`[SIGNAL] No actionable trade signal for this pair`);
@@ -251,6 +262,14 @@ async function performQuickExitCheck(config: Config): Promise<number> {
 
   if (closedCount > 0) {
     console.log(`[EXIT_MONITOR] ⚠️ CLOSED ${closedCount} position(s)! ${remainingTrades.length} remain.`);
+    
+    // Update performance metrics when trades are closed
+    const allTrades = getTradeHistory();
+    const performanceMetrics = calculatePerformanceMetrics(allTrades);
+    if (performanceMetrics.totalTrades > 0) {
+      console.log(`[EXIT_MONITOR] Updating performance metrics...`);
+      await savePerformanceMetrics(performanceMetrics);
+    }
   } else {
     console.log(`[EXIT_MONITOR] ✅ All positions within limits. ${remainingTrades.length} still open.`);
   }

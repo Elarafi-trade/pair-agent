@@ -9,7 +9,7 @@
     "lookbackPeriod": 100,
     "updateInterval": 3600000,
     "exitCheckInterval": 300000,
-    "maxScansPerCycle": 20,
+    "maxScansPerCycle": 50,
     "zScoreThreshold": 2.0,
     "correlationThreshold": 0.8,
     "randomPairCount": 5
@@ -21,8 +21,8 @@
     "maxHoldingPeriodDays": 7
   },
   "riskManagement": {
-    "maxConcurrentTrades": 3,
-    "maxCorrelatedTrades": 2,
+    "maxConcurrentTrades": 10,
+    "maxCorrelatedTrades": 3,
     "maxPortfolioRisk": 15,
     "minCashReserve": 0.30,
     "defaultLeverage": 5,
