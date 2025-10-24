@@ -11,7 +11,7 @@
     "exitCheckInterval": 300000,
     "maxScansPerCycle": 50,
     "scanDelayMs": 5000,
-    "zScoreThreshold": 2.0,
+    "zScoreThreshold": 1.8,
     "correlationThreshold": 0.85,
     "randomPairCount": 5,
     "minCointegrationPValue": 0.05,
