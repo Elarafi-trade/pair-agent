@@ -112,15 +112,33 @@ async function analyzeSinglePair(
     // Display formatted report
     console.log(formatAnalysisReport(symbolA, symbolB, result, { timeframe: '1h' }));
 
-    // Check if meets trade criteria
-    const shouldTrade = meetsTradeSignalCriteria(
+    // Check if meets trade criteria and has a directional signal
+    const meetsCriteria = meetsTradeSignalCriteria(
       result,
       config.analysis.zScoreThreshold,
       config.analysis.correlationThreshold
     );
 
+    const hasDirectionalSignal = result.signalType !== 'neutral';
+
+    if (meetsCriteria && hasDirectionalSignal) {
+      console.log(`[SIGNAL] ⚡ Trade signal detected! (criteria OK, signal: ${result.signalType.toUpperCase()})`);
+    } else if (meetsCriteria && !hasDirectionalSignal) {
+      console.log(`[SIGNAL] ⚠ Criteria met but signalType is NEUTRAL (z=${result.zScore.toFixed(2)}, corr=${result.corr.toFixed(3)})`);
+    } else if (!meetsCriteria && hasDirectionalSignal) {
+      console.log(`[SIGNAL] ⚠ Directional signal (${result.signalType}) present but quality filters failed (z=${result.zScore.toFixed(2)}, corr=${result.corr.toFixed(3)})`);
+    }
+
+    // If criteria meet but signalType is neutral (due to default ±2 bands), align
+    // direction with the configured threshold using z-score sign.
+    if (meetsCriteria && !hasDirectionalSignal) {
+      // Mutate result locally so downstream (executeTrade) gets a direction
+      (result as any).signalType = result.zScore > 0 ? 'short' : 'long';
+    }
+
+    const shouldTrade = meetsCriteria && ((result as any).signalType !== 'neutral');
+
     if (shouldTrade) {
-      console.log(`[SIGNAL] ⚡ Trade signal detected!`);
 
       // Check risk management limits before executing
       const openTrades = getOpenTrades();

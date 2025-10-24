@@ -15,6 +15,19 @@ import { generateNarrative } from './narrative.js';
 
 const PORT = Number(process.env.PORT || 3000);
 
+// Lightweight config loader (avoid importing index.ts to prevent circular deps)
+async function loadConfigSafe(): Promise<{
+  analysis?: { zScoreThreshold?: number; correlationThreshold?: number };
+}> {
+  try {
+    const { readFile } = await import('fs/promises');
+    const raw = await readFile('./eliza.config.json', 'utf-8');
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
 function writeJson(res: http.ServerResponse, status: number, body: unknown) {
   const text = JSON.stringify(body);
   res.statusCode = status;
@@ -90,14 +103,21 @@ const server = http.createServer(async (req, res) => {
           1000
         );
 
-        // Analyze the pair
+  // Analyze the pair
         const analysis = analyzePair(dataA.prices, dataB.prices);
 
         // Generate narrative
         const narrative = generateNarrative(symbolA, symbolB, analysis);
 
-        // Check if meets trade criteria
-        const meetsSignal = meetsTradeSignalCriteria(analysis, 2.0, 0.8);
+  // Load config for thresholds (fallback to sensible defaults)
+  const config = await loadConfigSafe();
+  const zThresh = config.analysis?.zScoreThreshold ?? 2.0;
+  const corrThresh = config.analysis?.correlationThreshold ?? 0.85;
+
+  // Check if meets trade criteria AND has a directional signal
+  const meetsCriteria = meetsTradeSignalCriteria(analysis, zThresh, corrThresh);
+  const hasDirectionalSignal = analysis.signalType !== 'neutral';
+  const shouldTrade = meetsCriteria && hasDirectionalSignal;
 
         // Build response
         const response = {
@@ -115,9 +135,10 @@ const server = http.createServer(async (req, res) => {
             signalType: analysis.signalType,
           },
           signal: {
-            meetsThreshold: meetsSignal,
-            action: meetsSignal ? (analysis.zScore > 0 ? `SHORT ${symbolA}, LONG ${symbolB}` : `LONG ${symbolA}, SHORT ${symbolB}`) : 'NEUTRAL',
-            recommendation: meetsSignal ? (analysis.zScore > 0 ? 'short' : 'long') : 'neutral',
+            meetsThreshold: shouldTrade,
+            action: shouldTrade ? (analysis.zScore > 0 ? `SHORT ${symbolA}, LONG ${symbolB}` : `LONG ${symbolA}, SHORT ${symbolB}`) : 'NEUTRAL',
+            recommendation: shouldTrade ? (analysis.zScore > 0 ? 'short' : 'long') : 'neutral',
+            thresholds: { zScore: zThresh, correlation: corrThresh },
           },
           narrative,
           timestamp: new Date().toISOString(),
