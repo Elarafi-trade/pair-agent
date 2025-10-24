@@ -12,12 +12,21 @@
     "maxScansPerCycle": 50,
     "scanDelayMs": 5000,
     "zScoreThreshold": 1.8,
-    "correlationThreshold": 0.85,
+    "correlationThreshold": 0.8,
     "randomPairCount": 5,
     "minCointegrationPValue": 0.05,
     "halfLifePeriods": 10,
     "volatilityWindow": 20,
-    "dynamicZScore": true
+    "dynamicZScore": true,
+    "predefinedFallbackPairs": [
+      "BTC-PERP/ETH-PERP",
+      "SOL-PERP/AVAX-PERP",
+      "ARB-PERP/OP-PERP",
+      "DOGE-PERP/SHIB-PERP",
+      "UNI-PERP/AAVE-PERP",
+      "LINK-PERP/GRT-PERP",
+      "RNDR-PERP/TAO-PERP"
+    ]
   },
   "exitConditions": {
     "meanReversionThreshold": 1.0,

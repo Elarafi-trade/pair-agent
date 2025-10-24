@@ -44,6 +44,7 @@ interface Config {
     exitCheckInterval?: number; // 🆕 Separate interval for exit monitoring (default: 5 minutes)
     maxScansPerCycle?: number;   // 🆕 Cap on scan iterations per cycle to avoid infinite loops
     scanDelayMs?: number;         // 🆕 Delay between pair scans to avoid API rate limits (default: 3000ms)
+    predefinedFallbackPairs?: string[]; // 🆕 Fallback pairs to test when maxScans reached without signal
     zScoreThreshold: number;
     correlationThreshold: number;
     randomPairCount?: number;
@@ -421,9 +422,62 @@ async function runAnalysisCycle(config: Config): Promise<void> {
     }
 
     if (!signalFound) {
-      // Reached cap? end this cycle to avoid infinite scanning
+      // Reached cap? Try predefined fallback pairs before ending cycle
       if (scanCount >= maxScans) {
-        console.log(`\n[SCAN] Reached max scans per cycle (${maxScans}). Ending cycle without a trade.`);
+        console.log(`\n[SCAN] Reached max scans per cycle (${maxScans}). Testing predefined fallback pairs...`);
+        
+        const fallbackPairs = config.analysis.predefinedFallbackPairs ?? [];
+        if (fallbackPairs.length > 0) {
+          console.log(`[FALLBACK] Testing ${fallbackPairs.length} predefined high-correlation pairs:\n  - ${fallbackPairs.join('\n  - ')}\n`);
+          
+          for (const pairString of fallbackPairs) {
+            const [symbolA, symbolB] = pairString.split('/');
+            if (!symbolA || !symbolB) {
+              console.warn(`[FALLBACK] Invalid pair format: ${pairString}. Skipping.`);
+              continue;
+            }
+            
+            try {
+              // Get market indices for the pair
+              const marketIndexA = await getMarketIndex(symbolA);
+              const marketIndexB = await getMarketIndex(symbolB);
+              
+              if (marketIndexA === undefined || marketIndexB === undefined) {
+                console.warn(`[FALLBACK] Market index not found for ${symbolA}/${symbolB}. Skipping.`);
+                continue;
+              }
+              
+              const hasSignal = await analyzeSinglePair(
+                marketIndexA,
+                marketIndexB,
+                symbolA,
+                symbolB,
+                config
+              );
+              
+              if (hasSignal) {
+                signalFound = true;
+                console.log(`\n[SUCCESS] ✅ Trade signal found in fallback pair ${symbolA}/${symbolB}!`);
+                break; // Exit fallback loop
+              }
+              
+              // Delay between fallback pairs
+              const delayMs = config.analysis.scanDelayMs ?? 3000;
+              if (fallbackPairs.indexOf(pairString) < fallbackPairs.length - 1) {
+                console.log(`[FALLBACK] Waiting ${delayMs}ms before next fallback pair...`);
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+              }
+            } catch (err: any) {
+              console.error(`[FALLBACK] Error analyzing ${symbolA}/${symbolB}: ${err.message}`);
+            }
+          }
+          
+          if (!signalFound) {
+            console.log(`\n[FALLBACK] No signals found in fallback pairs either. Ending cycle.`);
+          }
+        } else {
+          console.log(`[SCAN] No fallback pairs configured. Ending cycle without a trade.`);
+        }
         break;
       }
       console.log(`\n[SCAN] No signals found in scan #${scanCount}. Generating new random pairs...\n`);
