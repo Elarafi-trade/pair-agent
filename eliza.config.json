@@ -10,7 +10,7 @@
     "updateInterval": 3600000,
     "exitCheckInterval": 300000,
     "maxScansPerCycle": 50,
-    "scanDelayMs": 60000,
+    "scanDelayMs": 5000,
     "zScoreThreshold": 2.0,
     "correlationThreshold": 0.85,
     "randomPairCount": 5,
