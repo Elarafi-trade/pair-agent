@@ -311,6 +311,7 @@ async function runAnalysisCycle(config: Config): Promise<void> {
   // First, check exit conditions for all open trades
   const openTrades = getOpenTrades();
   if (openTrades.length > 0) {
+    const initialOpenCount = openTrades.length;
     console.log(`[EXIT_CHECK] Found ${openTrades.length} open trade(s) to check...\n`);
 
     // Build list of unique symbols in open trades
@@ -398,15 +399,34 @@ async function runAnalysisCycle(config: Config): Promise<void> {
 
     // Show remaining open trades after exit check
     const remainingOpenTrades = getOpenTrades();
+    const closedInCycle = initialOpenCount - remainingOpenTrades.length;
     console.log(`\n[EXIT_CHECK] Complete. ${remainingOpenTrades.length} position(s) remain open\n`);
+    
+    // Update performance metrics if any trades were closed
+    if (closedInCycle > 0) {
+      const allTrades = getTradeHistory();
+      const performanceMetrics = calculatePerformanceMetrics(allTrades);
+      if (performanceMetrics.totalTrades > 0) {
+        console.log(`[EXIT_CHECK] Updating performance metrics after closing ${closedInCycle} trade(s)...`);
+        await savePerformanceMetrics(performanceMetrics, remainingOpenTrades.length);
+      }
+    }
   }
 
   let signalFound = false;
   let scanCount = 0;
   const maxScans = config.analysis.maxScansPerCycle ?? 20;
+  const maxTrades = config.riskManagement?.maxConcurrentTrades ?? 5;
 
   // Keep scanning until a trade signal is found
   while (!signalFound) {
+    // Check if max concurrent trades already reached - stop scanning
+    const currentOpenTrades = getOpenTrades();
+    if (currentOpenTrades.length >= maxTrades) {
+      console.log(`\n[SCAN] ⚠️ Max concurrent trades already reached (${currentOpenTrades.length}/${maxTrades}). Stopping scan.`);
+      break;
+    }
+
     scanCount++;
 
     // Generate random pairs from Drift Protocol

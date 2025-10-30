@@ -38,7 +38,7 @@
     "partialExitZScore": 0.5
   },
   "riskManagement": {
-    "maxConcurrentTrades": 3,
+    "maxConcurrentTrades": 5,
     "maxCorrelatedTrades": 2,
     "maxPortfolioRisk": 10,
     "minCashReserve": 0.30,
