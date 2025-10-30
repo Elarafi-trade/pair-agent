@@ -55,7 +55,7 @@ interface Config {
     takeProfitPct: number;
     maxHoldingPeriodDays: number;
   };
-  riskManagement?: {
+  riskManagement: {
     maxConcurrentTrades: number;
     maxCorrelatedTrades: number;
     maxPortfolioRisk: number;
@@ -632,6 +632,7 @@ async function main(): Promise<void> {
     console.log(`[CONFIG] Update interval: ${config.analysis.updateInterval / 60000} minutes`);
     console.log(`[CONFIG] Z-score threshold: ±${config.analysis.zScoreThreshold}`);
     console.log(`[CONFIG] Correlation threshold: ${config.analysis.correlationThreshold}`);
+    console.log(`[CONFIG] Max concurrent trades: ${config.riskManagement.maxConcurrentTrades ?? 5}`);
 
     if (config.exitConditions) {
       console.log(`[CONFIG] Exit conditions:`);
