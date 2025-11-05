@@ -98,6 +98,12 @@ export interface TradeRecord {
   closeTimestamp?: number;
   closeReason?: string;
   closePnL?: number;
+
+  // Optional analytics fields used by the executor and analysis modules
+  halfLife?: number;                 // mean-reversion half-life estimate (in hours or periods)
+  sharpe?: number;                   // Sharpe ratio estimate for the pair strategy
+  cointegrationPValue?: number;      // p-value from cointegration test (Engle-Granger)
+  isCointegrated?: boolean;          // flag indicating cointegration test passed
 }
 
 /**
@@ -361,10 +367,12 @@ export async function executeTrade(
     longPrice: longPrice!,
     shortPrice: shortPrice!,
     status: 'open',
-    upnlPct: 0,
+    upnlPct: upnlPct || 0,
     volatility: result.std,
-    halfLife: 0,
-    sharpe: 0,
+    halfLife: result.halfLife,
+    sharpe: result.sharpe,
+    cointegrationPValue: result.cointegrationPValue,
+    isCointegrated: result.isCointegrated,
   };
 
   try {
@@ -395,6 +403,10 @@ export async function executeTrade(
       entryPriceA: priceA,
       entryPriceB: priceB,
       volatility: result.std,
+      halfLife: result.halfLife,
+      sharpe: result.sharpe,
+      cointegrationPValue: result.cointegrationPValue,
+      isCointegrated: result.isCointegrated,
       timeframe: '1h',
       engine: 'pair-agent v1.0',
       remarks: '-',
@@ -546,15 +558,13 @@ export async function closeTrade(
   let closePnL = trade.upnlPct ?? 0;
 
   // Cap PnL to prevent database overflow and catch bad price data
-  // Pair trading should rarely exceed ±100% per trade
-  // Cap at ±500% for extreme scenarios
-  if (Math.abs(closePnL) > 500) {
+  // Pair trading should rarely exceed ±50% per trade
+  // Cap at ±50% for extreme scenarios
+  if (Math.abs(closePnL) > 50) {
     console.warn(`[EXECUTOR] ⚠️ EXTREME close PnL for ${trade.pair}: ${closePnL.toFixed(2)}%`);
-    console.warn(`[EXECUTOR] Capping at ±500% - likely bad price data!`);
-    closePnL = Math.sign(closePnL) * 500;
-  }
-
-  // Update in database
+    console.warn(`[EXECUTOR] Capping at ±50% - likely bad price data!`);
+    closePnL = Math.sign(closePnL) * 50;
+  }  // Update in database
   if (trade.id) {
     try {
       await ensureDbInitialized();

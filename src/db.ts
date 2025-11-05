@@ -13,6 +13,8 @@ if (!process.env.DATABASE_URL) {
 const sql = neon(process.env.DATABASE_URL);
 
 export interface TradeRecord {
+  cointegrationPValue: number;
+  isCointegrated: boolean;
   id?: number;
   timestamp: string;
   pair: string;
@@ -33,10 +35,10 @@ export interface TradeRecord {
   closeTimestamp?: string;
   closeReason?: string;
   closePnL?: number;
-  upnlPct?: number;
-  volatility?: number;
-  halfLife?: number;
-  sharpe?: number;
+  upnlPct: number;
+  volatility: number;
+  halfLife: number;
+  sharpe: number;
 }
 
 export interface PerformanceMetrics {
@@ -86,6 +88,8 @@ export async function initializeTables() {
         upnl_pct DECIMAL(15, 4),
         volatility DECIMAL(15, 4),
         half_life DECIMAL(15, 4),
+        cointegration_p_value DECIMAL(15, 4),
+        is_cointegrated BOOLEAN,
         sharpe DECIMAL(15, 4),
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
@@ -127,18 +131,20 @@ export async function insertTrade(trade: TradeRecord): Promise<number> {
     INSERT INTO trades (
       timestamp, pair, action, signal, z_score, correlation, spread,
       spread_mean, spread_std, beta, reason, long_asset, short_asset,
-      long_price, short_price, status, upnl_pct, volatility, half_life, sharpe
+      long_price, short_price, status, upnl_pct, volatility, half_life, sharpe,
+      cointegration_p_value, is_cointegrated
     ) VALUES (
       ${trade.timestamp}, ${trade.pair}, ${trade.action}, ${trade.signal},
       ${trade.zScore}, ${trade.correlation}, ${trade.spread},
       ${trade.spreadMean}, ${trade.spreadStd}, ${trade.beta}, ${trade.reason},
       ${trade.longAsset}, ${trade.shortAsset}, ${trade.longPrice}, ${trade.shortPrice},
       ${trade.status}, ${trade.upnlPct || 0}, ${trade.volatility || 0},
-      ${trade.halfLife || 0}, ${trade.sharpe || 0}
+      ${trade.halfLife || 0}, ${trade.sharpe || 0},
+      ${trade.cointegrationPValue || null}, ${trade.isCointegrated || null}
     )
     RETURNING id
   `;
-  
+
   return result[0].id;
 }
 
@@ -201,12 +207,14 @@ export async function getAllTrades(): Promise<TradeRecord[]> {
       upnl_pct as "upnlPct",
       volatility,
       half_life as "halfLife",
-      sharpe
+      sharpe,
+      cointegration_p_value as "cointegrationPValue",
+      is_cointegrated as "isCointegrated"
     FROM trades
     ORDER BY timestamp DESC
     LIMIT 100
   `;
-  
+
   return result as TradeRecord[];
 }
 
@@ -236,12 +244,14 @@ export async function getOpenTrades(): Promise<TradeRecord[]> {
       upnl_pct as "upnlPct",
       volatility,
       half_life as "halfLife",
-      sharpe
+      sharpe,
+      cointegration_p_value as "cointegrationPValue",
+      is_cointegrated as "isCointegrated"
     FROM trades
     WHERE status = 'open'
     ORDER BY timestamp DESC
   `;
-  
+
   return result as TradeRecord[];
 }
 
@@ -273,12 +283,14 @@ export async function getClosedTrades(): Promise<TradeRecord[]> {
       close_pnl as "closePnL",
       volatility,
       half_life as "halfLife",
-      sharpe
+      sharpe,
+      cointegration_p_value as "cointegrationPValue",
+      is_cointegrated as "isCointegrated"
     FROM trades
     WHERE status = 'closed'
     ORDER BY timestamp DESC
   `;
-  
+
   return result as TradeRecord[];
 }
 
@@ -294,7 +306,7 @@ export async function getClosedTrades(): Promise<TradeRecord[]> {
 export async function savePerformanceMetrics(metrics: PerformanceMetrics) {
   // Delete all existing performance metrics (we only keep the latest)
   await sql`DELETE FROM performance_metrics`;
-  
+
   // Insert new record
   await sql`
     INSERT INTO performance_metrics (
@@ -336,10 +348,10 @@ export async function getPerformanceMetrics(): Promise<PerformanceMetrics | null
     ORDER BY created_at DESC
     LIMIT 1
   `;
-  
+
   if (result.length === 0) {
     return null;
   }
-  
+
   return result[0] as PerformanceMetrics;
 }

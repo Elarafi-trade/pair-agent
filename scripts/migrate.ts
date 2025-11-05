@@ -81,6 +81,8 @@ async function migrate() {
           volatility: trade.volatility || 0,
           halfLife: trade.halfLife || 0,
           sharpe: trade.sharpe || 0,
+          cointegrationPValue: trade.cointegrationPValue || 0,
+          isCointegrated: trade.isCointegrated || false,
         };
 
         await insertTrade(dbTrade);

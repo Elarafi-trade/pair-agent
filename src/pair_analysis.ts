@@ -19,6 +19,7 @@ export interface AnalysisResult {
   isCointegrated: boolean;      // Whether pair is cointegrated
   sharpe: number;      // Sharpe ratio of the spread returns
   volatility: number;  // Annualized volatility of spread
+  
 }
 
 /**
