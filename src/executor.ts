@@ -10,24 +10,24 @@ export async function updateUPnLForOpenTrades(getLatestPrice: (symbol: string) =
         console.warn(`[EXECUTOR] Trade ${trade.id} missing longAsset/shortAsset - skipping UPnL update`);
         continue;
       }
-      
+
       // Get current prices for each leg using explicit asset names
       const currentLong = getLatestPrice(trade.longAsset);
       const currentShort = getLatestPrice(trade.shortAsset);
-      
+
       // Validate prices
       if (currentLong === 0 || currentShort === 0) {
         console.warn(`[EXECUTOR] Invalid prices for ${trade.pair} (long=${currentLong}, short=${currentShort}) - skipping UPnL update`);
         continue;
       }
-      
+
       // Calculate PnL for each leg
       const longRet = (currentLong - trade.longPrice) / trade.longPrice;
       const shortRet = (trade.shortPrice - currentShort) / trade.shortPrice;
-      
+
       // Pair trading PnL is longRet + shortRet
       let newUpnl = (longRet + shortRet) * 100;
-      
+
       // Validate and cap PnL to prevent extreme values from bad price data
       // Typical pair trading PnL should be < ±50% per trade
       // Cap at ±500% to handle extreme but plausible scenarios
@@ -40,7 +40,7 @@ export async function updateUPnLForOpenTrades(getLatestPrice: (symbol: string) =
       } else if (Math.abs(newUpnl) > 100) {
         console.warn(`[EXECUTOR] High PnL for ${trade.pair}: ${newUpnl.toFixed(2)}% - verify prices: long ${trade.longAsset} ${currentLong.toFixed(4)}, short ${trade.shortAsset} ${currentShort.toFixed(4)}`);
       }
-      
+
       trade.upnlPct = newUpnl;
 
       // Update in database
@@ -128,7 +128,7 @@ function dbTradeToLocal(dbTrade: any): TradeRecord {
   const timestamp = typeof dbTrade.timestamp === 'string'
     ? new Date(dbTrade.timestamp).getTime()
     : dbTrade.timestamp;
-  
+
   const closeTimestamp = dbTrade.closeTimestamp
     ? typeof dbTrade.closeTimestamp === 'string'
       ? new Date(dbTrade.closeTimestamp).getTime()
@@ -177,18 +177,18 @@ function dbTradeToLocal(dbTrade: any): TradeRecord {
 export async function loadTradeHistory(): Promise<number> {
   try {
     await ensureDbInitialized();
-    
+
     // Load all trades from database
     const dbTrades = await getAllTrades();
-    
+
     // Clear existing and load from database
     tradeHistory.length = 0;
     tradeHistory.push(...dbTrades.map(dbTradeToLocal));
-    
+
     const openTrades = tradeHistory.filter(t => t.status === 'open');
     console.log(`[EXECUTOR] Loaded ${tradeHistory.length} trade(s) from database`);
     console.log(`[EXECUTOR] Found ${openTrades.length} open position(s) to track`);
-    
+
     return tradeHistory.length;
   } catch (error) {
     console.error(`[EXECUTOR] Failed to load trade history from database:`, error);
@@ -216,17 +216,17 @@ export function calculateKellySize(
   if (winRate <= 0 || winRate >= 1) return 0.1; // Default to 10% if no history
   if (avgWin <= 0) return 0.1;
   if (avgLoss >= 0) return 0.1; // Loss should be negative
-  
+
   const p = winRate;
   const q = 1 - p;
   const b = avgWin / Math.abs(avgLoss); // Win/loss ratio
-  
+
   // Full Kelly formula
   const fullKelly = (p * b - q) / b;
-  
+
   // Apply fractional Kelly for safety (typically 1/4 to 1/2)
   const fractionalKelly = fullKelly * kellyFraction;
-  
+
   // Clamp between 0% and 50% (never risk more than half capital on one trade)
   return Math.max(0, Math.min(0.5, fractionalKelly));
 }
@@ -245,11 +245,11 @@ export function adjustSizeForVolatility(
   targetVol: number = 50
 ): number {
   if (currentVol <= 0) return baseSize;
-  
+
   // Scale inversely with volatility
   const volRatio = targetVol / currentVol;
   const adjustedSize = baseSize * volRatio;
-  
+
   // Clamp between 10% and 100% of base size
   return Math.max(baseSize * 0.1, Math.min(baseSize, adjustedSize));
 }
@@ -265,7 +265,7 @@ export function checkTradingConditions(config?: {
   checkMarketRegime?: boolean;
 }): boolean {
   if (!config) return true;
-  
+
   // Check if current hour is in best execution hours
   if (config.bestExecutionHours && config.bestExecutionHours.length > 0) {
     const currentHour = new Date().getUTCHours();
@@ -274,12 +274,12 @@ export function checkTradingConditions(config?: {
       return false;
     }
   }
-  
+
   // Additional checks can be added here for:
   // - High volatility periods (check VIX or crypto fear index)
   // - Market regime (trending vs mean-reverting)
   // - Known high-impact events (FOMC, etc.)
-  
+
   return true;
 }
 
@@ -306,7 +306,7 @@ export async function executeTrade(
     console.log(`[EXECUTOR] No trade: ${symbolA}/${symbolB} signal is neutral`);
     return null;
   }
-  
+
   // Build reason string
   let reason = '';
   if (result.signalType === 'long') {
@@ -314,7 +314,7 @@ export async function executeTrade(
   } else if (result.signalType === 'short') {
     reason = `Spread ${result.zScore.toFixed(2)}σ above mean — expecting reversion downward. Short ${symbolA}, long ${symbolB}.`;
   }
-  
+
   // Determine long/short prices for pair trading
   let longPrice: number | undefined = undefined;
   let shortPrice: number | undefined = undefined;
@@ -400,7 +400,7 @@ export async function executeTrade(
       remarks: '-',
       status: 'open',
     };
-    
+
     // Log trade execution
     console.log(`
 ╔═══════════════════════════════════════════╗
@@ -418,10 +418,10 @@ export async function executeTrade(
   Reason: ${reason}
 ╔═══════════════════════════════════════════╗
 `);
-    
+
     // Store in history
     tradeHistory.push(trade);
-    
+
     return trade;
   } catch (error) {
     console.error('[EXECUTOR] Failed to save trade to database:', error);
@@ -483,18 +483,18 @@ export function getTradeSummary(): {
       avgCorrelation: 0,
     };
   }
-  
+
   const longTrades = tradeHistory.filter((t) => t.action === 'long').length;
   const shortTrades = tradeHistory.filter((t) => t.action === 'short').length;
-  
+
   const avgZScore =
     tradeHistory.reduce((sum, t) => sum + Math.abs(t.zScore), 0) /
     tradeHistory.length;
-    
+
   const avgCorrelation =
     tradeHistory.reduce((sum, t) => sum + t.correlation, 0) /
     tradeHistory.length;
-  
+
   return {
     totalTrades: tradeHistory.length,
     longTrades,
@@ -544,7 +544,7 @@ export async function closeTrade(
 
   const closeTimestamp = new Date().toISOString();
   let closePnL = trade.upnlPct ?? 0;
-  
+
   // Cap PnL to prevent database overflow and catch bad price data
   // Pair trading should rarely exceed ±100% per trade
   // Cap at ±500% for extreme scenarios
@@ -614,14 +614,35 @@ export async function checkExitConditions(
       continue;
     }
 
-    // Calculate current UPnL
+    // Calculate current UPnL using explicit long/short assets (CRITICAL FIX)
     const longPrice = trade.longPrice ?? 0;
     const shortPrice = trade.shortPrice ?? 0;
-    const currentLong = trade.action === 'long' ? currentPriceA : currentPriceB;
-    const currentShort = trade.action === 'long' ? currentPriceB : currentPriceA;
+
+    // Match current prices to the correct assets using longAsset/shortAsset
+    // This fixes the bug where trade.action was used incorrectly
+    const currentLong = trade.longAsset === trade.symbolA ? currentPriceA : currentPriceB;
+    const currentShort = trade.shortAsset === trade.symbolA ? currentPriceA : currentPriceB;
+
     const longRet = longPrice > 0 ? (currentLong - longPrice) / longPrice : 0;
     const shortRet = shortPrice > 0 ? (shortPrice - currentShort) / shortPrice : 0;
     const currentPnLPct = (longRet + shortRet) * 100;
+
+    // Validate PnL is reasonable before using it (early detection of bad data)
+    if (Math.abs(currentPnLPct) > 100) {
+      console.warn(`[EXIT_CHECK] ⚠️ Extreme PnL detected for ${trade.pair}: ${currentPnLPct.toFixed(2)}%`);
+      console.warn(`[EXIT_CHECK] Long ${trade.longAsset}: entry=$${longPrice.toFixed(6)} current=$${currentLong.toFixed(6)}`);
+      console.warn(`[EXIT_CHECK] Short ${trade.shortAsset}: entry=$${shortPrice.toFixed(6)} current=$${currentShort.toFixed(6)}`);
+      console.warn(`[EXIT_CHECK] Forcing close due to data quality issues`);
+
+      // Force close with capped loss
+      await closeTrade(
+        trade,
+        `Force closed - extreme PnL indicates bad price data (${currentPnLPct.toFixed(2)}%)`,
+        currentPriceA,
+        currentPriceB
+      );
+      continue;
+    }
 
     // Update UPnL
     trade.upnlPct = currentPnLPct;
