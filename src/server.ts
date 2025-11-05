@@ -134,7 +134,7 @@ const server = http.createServer(async (req, res) => {
             currentSpread: Number(analysis.spread.toFixed(4)),
             signalType: analysis.signalType,
             volatility: Number(analysis.volatility.toFixed(4)),
-            halfLife: Number(analysis.halfLife.toFixed(2)),
+            halfLife: isFinite(analysis.halfLife) ? Number(analysis.halfLife.toFixed(2)) : null,
             cointegrationPValue: Number(analysis.cointegrationPValue.toFixed(6)),
             isCointegrated: analysis.isCointegrated,
             sharpe: Number(analysis.sharpe.toFixed(4)),
