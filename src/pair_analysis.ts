@@ -14,11 +14,11 @@ export interface AnalysisResult {
   std: number;          // Standard deviation of the spread
   spread: number;       // Current spread value
   signalType: 'long' | 'short' | 'neutral';  // Trade signal
-  halfLife?: number;    // Half-life of mean reversion (in periods)
-  cointegrationPValue?: number;  // P-value from cointegration test
-  isCointegrated?: boolean;      // Whether pair is cointegrated
-  sharpe?: number;      // Sharpe ratio of the spread returns
-  volatility?: number;  // Annualized volatility of spread
+  halfLife: number;    // Half-life of mean reversion (in periods)
+  cointegrationPValue: number;  // P-value from cointegration test
+  isCointegrated: boolean;      // Whether pair is cointegrated
+  sharpe: number;      // Sharpe ratio of the spread returns
+  volatility: number;  // Annualized volatility of spread
 }
 
 /**
@@ -49,11 +49,11 @@ function correlation(x: number[], y: number[]): number {
   const n = x.length;
   const meanX = Number(mean(x));
   const meanY = Number(mean(y));
-  
+
   let numerator = 0;
   let denomX = 0;
   let denomY = 0;
-  
+
   for (let i = 0; i < n; i++) {
     const diffX = x[i] - meanX;
     const diffY = y[i] - meanY;
@@ -61,11 +61,11 @@ function correlation(x: number[], y: number[]): number {
     denomX += diffX * diffX;
     denomY += diffY * diffY;
   }
-  
+
   if (denomX === 0 || denomY === 0) {
     return 0;
   }
-  
+
   return numerator / Math.sqrt(denomX * denomY);
 }
 
@@ -83,24 +83,24 @@ function calculateBeta(pricesA: number[], pricesB: number[]): number {
 
   const returnsA = calculateReturns(pricesA);
   const returnsB = calculateReturns(pricesB);
-  
+
   const meanA = Number(mean(returnsA));
   const meanB = Number(mean(returnsB));
-  
+
   let covariance = 0;
   let varianceA = 0;
-  
+
   for (let i = 0; i < returnsA.length; i++) {
     const diffA = returnsA[i] - meanA;
     const diffB = returnsB[i] - meanB;
     covariance += diffA * diffB;
     varianceA += diffA * diffA;
   }
-  
+
   if (varianceA === 0) {
     return 0;
   }
-  
+
   return covariance / varianceA;
 }
 
@@ -210,7 +210,7 @@ function adfTest(spread: number[]): number {
   // More negative = more stationary
   // Critical values at different significance levels:
   // 1%: -3.43, 5%: -2.86, 10%: -2.57
-  
+
   // Convert t-stat to approximate p-value
   if (tStat < -3.43) return 0.01;      // Strongly stationary
   if (tStat < -2.86) return 0.05;      // Stationary at 5%
@@ -298,31 +298,31 @@ export function analyzePair(
   // Calculate returns for correlation
   const returnsA = calculateReturns(pricesA);
   const returnsB = calculateReturns(pricesB);
-  
+
   // Compute correlation coefficient
   const corr = correlation(returnsA, returnsB);
-  
+
   // Compute beta (hedge ratio)
   const beta = calculateBeta(pricesA, pricesB);
-  
+
   // Calculate spread: PriceA - β × PriceB
   const spreadArray = calculateSpread(pricesA, pricesB, beta);
-  
+
   // Calculate spread statistics
   const spreadMean = Number(mean(spreadArray));
   const spreadStd = Number(std(spreadArray, 'unbiased'));
-  
+
   // Current spread and z-score
   const currentSpread = spreadArray[spreadArray.length - 1];
   const zScore = (currentSpread - spreadMean) / spreadStd;
-  
+
   // Calculate advanced metrics
   const halfLife = calculateHalfLife(spreadArray);
   const cointegrationPValue = testCointegration(pricesA, pricesB, beta);
   const isCointegrated = cointegrationPValue < 0.05; // 95% confidence
   const sharpe = calculateSharpe(spreadArray);
   const volatility = calculateVolatility(spreadArray);
-  
+
   // Generate signal based on z-score
   let signalType: 'long' | 'short' | 'neutral' = 'neutral';
   if (zScore > 2) {
@@ -330,7 +330,7 @@ export function analyzePair(
   } else if (zScore < -2) {
     signalType = 'long'; // Spread too low, expect mean reversion upward
   }
-  
+
   return {
     corr,
     beta,

@@ -90,7 +90,7 @@ const server = http.createServer(async (req, res) => {
         const { symbolA, symbolB, limit } = data;
 
         if (!symbolA || !symbolB) {
-          return writeJson(res, 400, { 
+          return writeJson(res, 400, {
             error: 'Missing required fields: symbolA and symbolB are required',
             example: { symbolA: 'SOL-PERP', symbolB: 'ETH-PERP', limit: 100 }
           });
@@ -103,21 +103,21 @@ const server = http.createServer(async (req, res) => {
           1000
         );
 
-  // Analyze the pair
+        // Analyze the pair
         const analysis = analyzePair(dataA.prices, dataB.prices);
 
         // Generate narrative
         const narrative = generateNarrative(symbolA, symbolB, analysis);
 
-  // Load config for thresholds (fallback to sensible defaults)
-  const config = await loadConfigSafe();
-  const zThresh = config.analysis?.zScoreThreshold ?? 2.0;
-  const corrThresh = config.analysis?.correlationThreshold ?? 0.85;
+        // Load config for thresholds (fallback to sensible defaults)
+        const config = await loadConfigSafe();
+        const zThresh = config.analysis?.zScoreThreshold ?? 2.0;
+        const corrThresh = config.analysis?.correlationThreshold ?? 0.85;
 
-  // Check if meets trade criteria AND has a directional signal
-  const meetsCriteria = meetsTradeSignalCriteria(analysis, zThresh, corrThresh);
-  const hasDirectionalSignal = analysis.signalType !== 'neutral';
-  const shouldTrade = meetsCriteria && hasDirectionalSignal;
+        // Check if meets trade criteria AND has a directional signal
+        const meetsCriteria = meetsTradeSignalCriteria(analysis, zThresh, corrThresh);
+        const hasDirectionalSignal = analysis.signalType !== 'neutral';
+        const shouldTrade = meetsCriteria && hasDirectionalSignal;
 
         // Build response
         const response = {
@@ -133,6 +133,11 @@ const server = http.createServer(async (req, res) => {
             spreadStd: Number(analysis.std.toFixed(4)),
             currentSpread: Number(analysis.spread.toFixed(4)),
             signalType: analysis.signalType,
+            volatility: Number(analysis.volatility.toFixed(4)),
+            halfLife: Number(analysis.halfLife.toFixed(2)),
+            cointegrationPValue: Number(analysis.cointegrationPValue.toFixed(6)),
+            isCointegrated: analysis.isCointegrated,
+            sharpe: Number(analysis.sharpe.toFixed(4)),
           },
           signal: {
             meetsThreshold: shouldTrade,
@@ -147,9 +152,9 @@ const server = http.createServer(async (req, res) => {
         return writeJson(res, 200, response);
       } catch (err: any) {
         console.error('[API] Analysis error:', err);
-        return writeJson(res, 500, { 
-          error: 'Analysis failed', 
-          message: err.message 
+        return writeJson(res, 500, {
+          error: 'Analysis failed',
+          message: err.message
         });
       }
     }
