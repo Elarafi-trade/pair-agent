@@ -207,18 +207,33 @@ function adfTest(spread: number[]): number {
   // Calculate t-statistic for H0: rho = 1 (unit root = non-stationary)
   const tStat = (rho - 1) / (residualStd / Math.sqrt(denominator));
 
+  // Debug logging (can be enabled by setting environment variable)
+  const debugCointegration = process.env.DEBUG_COINTEGRATION === 'true';
+  if (debugCointegration) {
+    console.log(`[ADF] rho=${rho.toFixed(4)}, tStat=${tStat.toFixed(4)}, n=${spread.length}`);
+  }
+
   // Simplified critical values for Dickey-Fuller test (approximate)
   // More negative = more stationary
   // Critical values at different significance levels:
   // 1%: -3.43, 5%: -2.86, 10%: -2.57
 
-  // Convert t-stat to approximate p-value
-  if (tStat < -3.43) return 0.01;      // Strongly stationary
-  if (tStat < -2.86) return 0.05;      // Stationary at 5%
-  if (tStat < -2.57) return 0.10;      // Weakly stationary
-  if (tStat < -2.0) return 0.20;
-  if (tStat < -1.5) return 0.40;
-  return 0.80;                          // Likely non-stationary
+  // Convert t-stat to approximate p-value with more granularity
+  let pValue: number;
+  if (tStat < -3.43) pValue = 0.01;      // Strongly stationary (reject H0 at 1%)
+  else if (tStat < -2.86) pValue = 0.05;      // Stationary at 5% (cointegrated)
+  else if (tStat < -2.57) pValue = 0.10;      // Weakly stationary at 10%
+  else if (tStat < -2.0) pValue = 0.20;       // Borderline stationary
+  else if (tStat < -1.5) pValue = 0.40;       // Weak evidence of stationarity
+  else if (tStat < -1.0) pValue = 0.60;       // Very weak evidence
+  else if (tStat < -0.5) pValue = 0.75;       // Likely non-stationary
+  else pValue = 0.90;                          // Strongly non-stationary (unit root present)
+
+  if (debugCointegration) {
+    console.log(`[ADF] p-value=${pValue.toFixed(4)} (${pValue < 0.05 ? 'COINTEGRATED' : 'NOT cointegrated'})`);
+  }
+
+  return pValue;
 }
 
 /**

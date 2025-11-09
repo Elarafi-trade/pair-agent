@@ -14,8 +14,8 @@
     "zScoreThreshold": 1.8,
     "correlationThreshold": 0.8,
     "randomPairCount": 5,
-    "minCointegrationPValue": 0.05,
-    "halfLifePeriods": 10,
+    "minCointegrationPValue": 1.0,
+    "halfLifePeriods": 100,
     "volatilityWindow": 20,
     "dynamicZScore": true,
     "predefinedFallbackPairs": [

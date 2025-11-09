@@ -88,33 +88,33 @@ export function calculatePerformanceMetrics(trades: TradeRecord[]): PerformanceM
 
   // APY calculation: ((1 + total return)^(365/days) - 1) * 100
   // Cap APY calculation to prevent infinity when time period is very small
-  const totalReturnDecimal = totalReturnWithLeverage / 100;
+ // const totalReturnDecimal = totalReturnWithLeverage / 100;
   let apy = 0;
   
-  // Require minimum 3 days of data OR 5+ trades to calculate meaningful APY
-  // Short time periods create unrealistic extrapolations
-  if (totalDays >= 3 || totalTrades >= 5) {
-    if (totalDays >= 1) {
-      const rawApy = (Math.pow(1 + totalReturnDecimal, 365 / totalDays) - 1) * 100;
-      // Cap at ±999,999% to prevent database overflow
-      apy = Math.max(-999999, Math.min(999999, rawApy));
-      // Set to 0 if result is not finite (Infinity, -Infinity, NaN)
-      if (!Number.isFinite(apy)) {
-        apy = 0;
-      }
-    } else {
-      // For periods < 1 day, use simple annualized rate without compounding
-      apy = totalDays > 0 ? (totalReturnDecimal * (365 / totalDays)) * 100 : 0;
-      // Still cap for safety
-      apy = Math.max(-999999, Math.min(999999, apy));
-      if (!Number.isFinite(apy)) {
-        apy = 0;
-      }
-    }
-  } else {
-    // Not enough data - set APY to 0 and let it calculate once we have sufficient history
-    apy = 0;
-  }
+  // // Require minimum 3 days of data OR 5+ trades to calculate meaningful APY
+  // // Short time periods create unrealistic extrapolations
+  // if (totalDays >= 3 || totalTrades >= 5) {
+  //   if (totalDays >= 1) {
+  //     const rawApy = (Math.pow(1 + totalReturnDecimal, 365 / totalDays) - 1) * 100;
+  //     // Cap at ±999,999% to prevent database overflow
+  //     apy = Math.max(-999999, Math.min(999999, rawApy));
+  //     // Set to 0 if result is not finite (Infinity, -Infinity, NaN)
+  //     if (!Number.isFinite(apy)) {
+  //       apy = 0;
+  //     }
+  //   } else {
+  //     // For periods < 1 day, use simple annualized rate without compounding
+  //     apy = totalDays > 0 ? (totalReturnDecimal * (365 / totalDays)) * 100 : 0;
+  //     // Still cap for safety
+  //     apy = Math.max(-999999, Math.min(999999, apy));
+  //     if (!Number.isFinite(apy)) {
+  //       apy = 0;
+  //     }
+  //   }
+  // } else {
+  //   // Not enough data - set APY to 0 and let it calculate once we have sufficient history
+  //   apy = 0;
+  // }
 
   // Average returns per day
   const avgReturnsPerDay = totalDays > 0 ? totalReturnWithoutLeverage / totalDays : 0;

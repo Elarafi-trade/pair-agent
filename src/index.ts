@@ -48,6 +48,10 @@ interface Config {
     zScoreThreshold: number;
     correlationThreshold: number;
     randomPairCount?: number;
+    minCointegrationPValue?: number; // 🆕 Max p-value for cointegration (default: 0.05)
+    halfLifePeriods?: number;        // 🆕 Max half-life in periods (default: 100)
+    volatilityWindow?: number;
+    dynamicZScore?: boolean;
   };
   exitConditions?: {
     meanReversionThreshold: number;
@@ -62,6 +66,14 @@ interface Config {
     minCashReserve: number;
     defaultLeverage: number;
     maxLeverage: number;
+    minSharpeRatio?: number; // 🆕 Min Sharpe ratio for trade (default: 0.5)
+  };
+  filters?: {
+    minDailyVolume?: number;
+    maxSpreadPct?: number;
+    minPrice?: number;
+    maxVolatility?: number;
+    minLiquidity?: number;
   };
   apis: {
     drift: {
@@ -116,7 +128,13 @@ async function analyzeSinglePair(
     const meetsCriteria = meetsTradeSignalCriteria(
       result,
       config.analysis.zScoreThreshold,
-      config.analysis.correlationThreshold
+      config.analysis.correlationThreshold,
+      {
+        minCointegrationPValue: config.analysis.minCointegrationPValue,
+        maxHalfLife: config.analysis.halfLifePeriods,
+        minSharpe: config.riskManagement.minSharpeRatio,
+        maxVolatility: config.filters?.maxVolatility,
+      }
     );
 
     const hasDirectionalSignal = result.signalType !== 'neutral';

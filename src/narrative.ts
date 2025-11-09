@@ -131,6 +131,10 @@ export function formatAnalysisReport(
 ═══════════════════════════════════════════
 Pair:         ${symbolA} / ${symbolB}
 Correlation:  ${result.corr.toFixed(3)}
+Z-Score:      ${result.zScore.toFixed(2)}
+Mean:        ${result.mean.toFixed(2)}
+isCointegrated: ${result.isCointegrated ? 'YES' : 'NO'}
+cointegrationPValue: ${result.cointegrationPValue.toFixed(4)}
 Beta:         ${result.beta.toFixed(3)}
 Timeframe:    ${opts?.timeframe ?? 'n/a'}
 ─────────────────────────────────────────────
