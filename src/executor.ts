@@ -273,13 +273,13 @@ export function checkTradingConditions(config?: {
   if (!config) return true;
 
   // Check if current hour is in best execution hours
-  if (config.bestExecutionHours && config.bestExecutionHours.length > 0) {
-    const currentHour = new Date().getUTCHours();
-    if (!config.bestExecutionHours.includes(currentHour)) {
-      console.log(`[EXECUTOR] Skipping trade - current hour ${currentHour} not in best execution hours`);
-      return false;
-    }
-  }
+  // if (config.bestExecutionHours && config.bestExecutionHours.length > 0) {
+  //   const currentHour = new Date().getUTCHours();
+  //   if (!config.bestExecutionHours.includes(currentHour)) {
+  //     console.log(`[EXECUTOR] Skipping trade - current hour ${currentHour} not in best execution hours`);
+  //     return false;
+  //   }
+  // }
 
   // Additional checks can be added here for:
   // - High volatility periods (check VIX or crypto fear index)

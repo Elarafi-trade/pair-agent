@@ -14,8 +14,7 @@
     "zScoreThreshold": 1.8,
     "correlationThreshold": 0.8,
     "randomPairCount": 5,
-    "minCointegrationPValue": 1.0,
-    "halfLifePeriods": 100,
+    "halfLifePeriods": 30,
     "volatilityWindow": 20,
     "dynamicZScore": true,
     "predefinedFallbackPairs": [
@@ -38,7 +37,7 @@
     "partialExitZScore": 0.5
   },
   "riskManagement": {
-    "maxConcurrentTrades": 5,
+    "maxConcurrentTrades": 10,
     "maxCorrelatedTrades": 2,
     "maxPortfolioRisk": 10,
     "minCashReserve": 0.30,
@@ -58,7 +57,12 @@
     "minLiquidity": 100000
   },
   "timing": {
-    "bestExecutionHours": [2, 8, 14, 20],
+    "bestExecutionHours": [
+      2,
+      8,
+      14,
+      20
+    ],
     "avoidHighVolatility": true,
     "checkMarketRegime": true
   },

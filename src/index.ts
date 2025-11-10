@@ -48,7 +48,6 @@ interface Config {
     zScoreThreshold: number;
     correlationThreshold: number;
     randomPairCount?: number;
-    minCointegrationPValue?: number; // 🆕 Max p-value for cointegration (default: 0.05)
     halfLifePeriods?: number;        // 🆕 Max half-life in periods (default: 100)
     volatilityWindow?: number;
     dynamicZScore?: boolean;
@@ -130,7 +129,6 @@ async function analyzeSinglePair(
       config.analysis.zScoreThreshold,
       config.analysis.correlationThreshold,
       {
-        minCointegrationPValue: config.analysis.minCointegrationPValue,
         maxHalfLife: config.analysis.halfLifePeriods,
         minSharpe: config.riskManagement.minSharpeRatio,
         maxVolatility: config.filters?.maxVolatility,

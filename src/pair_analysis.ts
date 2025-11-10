@@ -376,8 +376,6 @@ export function meetsTradeSignalCriteria(
   zScoreThreshold: number = 2.0,
   corrThreshold: number = 0.85,
   config?: {
-    requireCointegration?: boolean;
-    minCointegrationPValue?: number;
     maxHalfLife?: number;
     minSharpe?: number;
     maxVolatility?: number;
@@ -392,20 +390,6 @@ export function meetsTradeSignalCriteria(
 
   // Advanced criteria (if config provided)
   if (config) {
-    // Check cointegration
-    if (config.requireCointegration && !result.isCointegrated) {
-      return false;
-    }
-
-    // Check cointegration p-value
-    if (
-      config.minCointegrationPValue !== undefined &&
-      result.cointegrationPValue !== undefined &&
-      result.cointegrationPValue > config.minCointegrationPValue
-    ) {
-      return false;
-    }
-
     // Check half-life (reject if too slow or too fast)
     if (
       config.maxHalfLife !== undefined &&
