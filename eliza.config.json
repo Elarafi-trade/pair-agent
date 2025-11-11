@@ -14,17 +14,20 @@
     "zScoreThreshold": 1.8,
     "correlationThreshold": 0.8,
     "randomPairCount": 5,
-    "halfLifePeriods": 30,
+    "halfLifePeriods": 10,
     "volatilityWindow": 20,
     "dynamicZScore": true,
     "predefinedFallbackPairs": [
       "BTC-PERP/ETH-PERP",
       "SOL-PERP/AVAX-PERP",
       "ARB-PERP/OP-PERP",
-      "DOGE-PERP/SHIB-PERP",
-      "UNI-PERP/AAVE-PERP",
+      "MATIC-PERP/ADA-PERP",
+      "DOT-PERP/ATOM-PERP",
+      "UNI-PERP/SUSHI-PERP",
+      "AAVE-PERP/COMP-PERP",
       "LINK-PERP/GRT-PERP",
-      "RNDR-PERP/TAO-PERP"
+      "RNDR-PERP/FET-PERP",
+      "NEAR-PERP/FTM-PERP"
     ]
   },
   "exitConditions": {
