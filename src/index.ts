@@ -16,7 +16,7 @@ import {
   loadTradeHistory,
   getTradeHistory
 } from './executor.js';
-import { generateRandomPairCombinations, getMarketIndex } from './pair_selector.js';
+import { generateSmartPairCombinations, getMarketIndex } from './pair_selector.js';
 import { buildSymbolToIndexMap } from './market_cache.js';
 import {
   calculatePerformanceMetrics,
@@ -132,6 +132,7 @@ async function analyzeSinglePair(
         maxHalfLife: config.analysis.halfLifePeriods,
         minSharpe: config.riskManagement.minSharpeRatio,
         maxVolatility: config.filters?.maxVolatility,
+        dynamicZScore: config.analysis.dynamicZScore, // Enable dynamic z-score adjustment
       }
     );
 
@@ -182,7 +183,7 @@ async function analyzeSinglePair(
       const currentPriceB = dataB.prices[dataB.prices.length - 1];
 
       const trade = await executeTrade(symbolA, symbolB, result, currentPriceA, currentPriceB);
-      
+
       // Update performance metrics immediately after trade execution
       if (trade) {
         const allTrades = getTradeHistory();
@@ -193,7 +194,7 @@ async function analyzeSinglePair(
           await savePerformanceMetrics(performanceMetrics, openTradesCount);
         }
       }
-      
+
       return true; // Signal found
     } else {
       console.log(`[SIGNAL] No actionable trade signal for this pair`);
@@ -299,7 +300,7 @@ async function performQuickExitCheck(config: Config): Promise<number> {
 
   if (closedCount > 0) {
     console.log(`[EXIT_MONITOR] ⚠️ CLOSED ${closedCount} position(s)! ${remainingTrades.length} remain.`);
-    
+
     // Update performance metrics when trades are closed
     const allTrades = getTradeHistory();
     const openTradesCount = remainingTrades.length;
@@ -342,7 +343,7 @@ async function runAnalysisCycle(config: Config): Promise<void> {
     let symbolToIndex: Record<string, number> = {};
     try {
       symbolToIndex = await buildSymbolToIndexMap();
-    } catch {}
+    } catch { }
 
     // Fetch current prices for all symbols using market index mapping
     let latestPriceMap: Record<string, number> = {};
@@ -417,7 +418,7 @@ async function runAnalysisCycle(config: Config): Promise<void> {
     const remainingOpenTrades = getOpenTrades();
     const closedInCycle = initialOpenCount - remainingOpenTrades.length;
     console.log(`\n[EXIT_CHECK] Complete. ${remainingOpenTrades.length} position(s) remain open\n`);
-    
+
     // Update performance metrics if any trades were closed
     if (closedInCycle > 0) {
       const allTrades = getTradeHistory();
@@ -445,12 +446,12 @@ async function runAnalysisCycle(config: Config): Promise<void> {
 
     scanCount++;
 
-    // Generate random pairs from Drift Protocol
-    console.log(`[PAIR_SELECTOR] Scan #${scanCount} - Generating random trading pairs...`);
+    // Generate smart pairs from Drift Protocol (sector-based for better correlation)
+    console.log(`[PAIR_SELECTOR] Scan #${scanCount} - Generating smart sector-based pairs...`);
     const pairCount = config.analysis.randomPairCount ?? 3;
-    const randomPairs = await generateRandomPairCombinations(pairCount);
+    const randomPairs = await generateSmartPairCombinations(pairCount);
 
-    console.log(`[PAIR_SELECTOR] Selected ${randomPairs.length} random pairs for this scan\n`);
+    console.log(`[PAIR_SELECTOR] Selected ${randomPairs.length} pairs for this scan\n`);
 
     // Analyze each pair sequentially
     for (const pair of randomPairs) {
@@ -466,7 +467,7 @@ async function runAnalysisCycle(config: Config): Promise<void> {
         console.log(`\n[SUCCESS] ✅ Trade signal found after ${scanCount} scan(s)!`);
         break; // Exit the for loop
       }
-      
+
       // Add delay between pair scans to avoid API rate limits
       const delayMs = config.analysis.scanDelayMs ?? 3000;
       if (randomPairs.indexOf(pair) < randomPairs.length - 1) { // Don't delay after last pair
@@ -479,28 +480,28 @@ async function runAnalysisCycle(config: Config): Promise<void> {
       // Reached cap? Try predefined fallback pairs before ending cycle
       if (scanCount >= maxScans) {
         console.log(`\n[SCAN] Reached max scans per cycle (${maxScans}). Testing predefined fallback pairs...`);
-        
+
         const fallbackPairs = config.analysis.predefinedFallbackPairs ?? [];
         if (fallbackPairs.length > 0) {
           console.log(`[FALLBACK] Testing ${fallbackPairs.length} predefined high-correlation pairs:\n  - ${fallbackPairs.join('\n  - ')}\n`);
-          
+
           for (const pairString of fallbackPairs) {
             const [symbolA, symbolB] = pairString.split('/');
             if (!symbolA || !symbolB) {
               console.warn(`[FALLBACK] Invalid pair format: ${pairString}. Skipping.`);
               continue;
             }
-            
+
             try {
               // Get market indices for the pair
               const marketIndexA = await getMarketIndex(symbolA);
               const marketIndexB = await getMarketIndex(symbolB);
-              
+
               if (marketIndexA === undefined || marketIndexB === undefined) {
                 console.warn(`[FALLBACK] Market index not found for ${symbolA}/${symbolB}. Skipping.`);
                 continue;
               }
-              
+
               const hasSignal = await analyzeSinglePair(
                 marketIndexA,
                 marketIndexB,
@@ -508,13 +509,13 @@ async function runAnalysisCycle(config: Config): Promise<void> {
                 symbolB,
                 config
               );
-              
+
               if (hasSignal) {
                 signalFound = true;
                 console.log(`\n[SUCCESS] ✅ Trade signal found in fallback pair ${symbolA}/${symbolB}!`);
                 break; // Exit fallback loop
               }
-              
+
               // Delay between fallback pairs
               const delayMs = config.analysis.scanDelayMs ?? 3000;
               if (fallbackPairs.indexOf(pairString) < fallbackPairs.length - 1) {
@@ -525,7 +526,7 @@ async function runAnalysisCycle(config: Config): Promise<void> {
               console.error(`[FALLBACK] Error analyzing ${symbolA}/${symbolB}: ${err.message}`);
             }
           }
-          
+
           if (!signalFound) {
             console.log(`\n[FALLBACK] No signals found in fallback pairs either. Ending cycle.`);
           }
@@ -555,7 +556,7 @@ async function runAnalysisCycle(config: Config): Promise<void> {
     let symbolToIndex: Record<string, number> = {};
     try {
       symbolToIndex = await buildSymbolToIndexMap();
-    } catch {}
+    } catch { }
 
     for (const symbol of symbols) {
       try {

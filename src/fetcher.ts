@@ -147,7 +147,7 @@ export async function fetchPairData(
 
     // Handle mismatched data lengths by trimming to the shorter length
     const minLength = Math.min(resultA.prices.length, resultB.prices.length);
-    
+
     if (resultA.prices.length !== resultB.prices.length) {
       console.warn(
         `[FETCHER] Mismatched data lengths: ${symbolA}=${resultA.prices.length}, ${symbolB}=${resultB.prices.length}. Using ${minLength} data points.`
@@ -178,9 +178,8 @@ export async function fetchPairData(
     const isNoData = (error && (error as any).isNoData) === true;
     const isClientError = (error && (error as any).isClientError) === true;
     if (isNoData || isClientError) {
-      console.warn(`[FETCHER] Skipping pair ${symbolA}/${symbolB}: ${
-        (error as any)?.message ?? 'client/no-data error'
-      }`);
+      console.warn(`[FETCHER] Skipping pair ${symbolA}/${symbolB}: ${(error as any)?.message ?? 'client/no-data error'
+        }`);
     } else {
       console.error(`Error fetching pair data (${symbolA}/${symbolB}):`, error);
     }
@@ -202,7 +201,7 @@ export async function withRetry<T>(
   try {
     return await fn();
   } catch (error) {
-  // Do not retry on known client/no-data errors
+    // Do not retry on known client/no-data errors
     const clientErr = (error && (error as any).isClientError) === true;
     const noDataErr = (error && (error as any).isNoData) === true;
     const rateLimited = (error && (error as any).isRateLimited) === true;
@@ -212,11 +211,11 @@ export async function withRetry<T>(
     }
 
     if (retries === 0) throw error;
-    
+
     const backoff = rateLimited ? Math.max(delay * 2, 1500) : delay;
     console.warn(`Retrying... (${retries} attempts left)${rateLimited ? ' [429 backoff]' : ''}`);
     await new Promise((resolve) => setTimeout(resolve, backoff));
-    
+
     return withRetry(fn, retries - 1, delay * 2);
   }
 }
@@ -242,7 +241,7 @@ export async function fetchCurrentPrice(marketIndex: number, symbol?: string): P
         if (typeof oracleRaw === 'string') {
           oracleRaw = Number(oracleRaw);
         }
-        
+
         if (typeof oracleRaw === 'number' && Number.isFinite(oracleRaw) && oracleRaw > 0) {
           const oraclePrice = oracleRaw / 1e6; // Convert from 1e6 precision to decimal
           return oraclePrice;
@@ -265,7 +264,7 @@ export async function fetchCurrentPrice(marketIndex: number, symbol?: string): P
       if (typeof oracleRaw === 'string') {
         oracleRaw = Number(oracleRaw);
       }
-      
+
       if (typeof oracleRaw === 'number' && Number.isFinite(oracleRaw) && oracleRaw > 0) {
         const oraclePrice = oracleRaw / 1e6; // Convert from 1e6 precision to decimal
         return oraclePrice;
@@ -316,7 +315,7 @@ export async function fetchCurrentPriceBySymbol(symbol: string): Promise<number>
     if (typeof oracleRaw === 'string') {
       oracleRaw = Number(oracleRaw);
     }
-    
+
     if (typeof oracleRaw === 'number' && Number.isFinite(oracleRaw) && oracleRaw > 0) {
       const oraclePrice = oracleRaw / 1e6; // Convert from 1e6 precision to decimal
       return oraclePrice;
@@ -355,7 +354,7 @@ export async function fetchMultiplePrices(marketIndices: number[]): Promise<Reco
     });
 
     const results = await Promise.all(pricePromises);
-    
+
     const priceMap: Record<number, number> = {};
     results.forEach(({ idx, price }) => {
       priceMap[idx] = price;

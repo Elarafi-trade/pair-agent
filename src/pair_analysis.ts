@@ -379,11 +379,44 @@ export function meetsTradeSignalCriteria(
     maxHalfLife?: number;
     minSharpe?: number;
     maxVolatility?: number;
+    dynamicZScore?: boolean; // Enable dynamic z-score adjustment
   }
 ): boolean {
-  // Basic criteria
+  // Dynamic z-score adjustment based on half-life (if enabled)
+  let effectiveZThreshold = zScoreThreshold;
+  
+  if (config?.dynamicZScore && result.halfLife !== undefined && isFinite(result.halfLife)) {
+    // Realistic half-life ranges for crypto (hourly data):
+    // Ultra-fast: < 8h (intraday mean reversion) = most aggressive
+    // Fast: 8-24h (same-day reversion) = aggressive
+    // Medium: 24-48h (1-2 day reversion) = standard
+    // Slow: > 48h (multi-day reversion) = conservative/skip
+    
+    if (result.halfLife < 8) {
+      effectiveZThreshold = zScoreThreshold * 0.70; // 30% lower for ultra-fast pairs (1.8 → 1.26)
+    } else if (result.halfLife < 24) {
+      effectiveZThreshold = zScoreThreshold * 0.85; // 15% lower for fast pairs (1.8 → 1.53)
+    } else if (result.halfLife < 48) {
+      effectiveZThreshold = zScoreThreshold * 1.00; // Standard for medium pairs (1.8 → 1.80)
+    } else {
+      effectiveZThreshold = zScoreThreshold * 1.30; // 30% higher for slow pairs (1.8 → 2.34)
+    }
+    
+    // Log adjustment for transparency
+    if (effectiveZThreshold !== zScoreThreshold) {
+      const speed = result.halfLife < 8 ? 'ULTRA-FAST' : 
+                    result.halfLife < 24 ? 'FAST' : 
+                    result.halfLife < 48 ? 'MEDIUM' : 'SLOW';
+      console.log(
+        `[DYNAMIC_Z] ${speed} half-life ${result.halfLife.toFixed(1)}h → ` +
+        `z-threshold: ${zScoreThreshold.toFixed(2)} → ${effectiveZThreshold.toFixed(2)}`
+      );
+    }
+  }
+
+  // Basic criteria with dynamic threshold
   const meetsBasic =
-    Math.abs(result.zScore) >= zScoreThreshold &&
+    Math.abs(result.zScore) >= effectiveZThreshold &&
     Math.abs(result.corr) >= corrThreshold;
 
   if (!meetsBasic) return false;

@@ -130,3 +130,140 @@ export async function generateRandomPairCombinations(
 
   return pairs;
 }
+
+/**
+ * Asset categories for intelligent pair grouping
+ */
+const ASSET_CATEGORIES = {
+  MAJORS: ['BTC', 'ETH', 'SOL'],
+  L1_L2: ['ARB', 'OP', 'MATIC', 'POL', 'AVAX', 'NEAR', 'FTM', 'ATOM', 'DOT', 'ADA'],
+  DEFI: ['UNI', 'AAVE', 'SUSHI', 'COMP', 'CRV', 'MKR', 'SNX', 'LDO'],
+  AI: ['RNDR', 'FET', 'AGIX', 'TAO', 'WLD'],
+  MEME: ['DOGE', 'SHIB', 'WIF', 'BONK', 'PEPE', 'POPCAT', 'MEW'],
+  GAMING: ['IMX', 'AXS', 'SAND', 'MANA', 'GALA'],
+  ORACLE_DATA: ['LINK', 'GRT', 'API3', 'BAND'],
+};
+
+/**
+ * Categorize a market symbol
+ */
+function categorizeAsset(symbol: string): string | null {
+  const base = symbol.replace('-PERP', '');
+  
+  for (const [category, tokens] of Object.entries(ASSET_CATEGORIES)) {
+    if (tokens.includes(base)) {
+      return category;
+    }
+  }
+  return null; // Uncategorized
+}
+
+/**
+ * Calculate priority score for a market (lower = higher priority)
+ */
+function getMarketPriority(symbol: string): number {
+  const base = symbol.replace('-PERP', '');
+  
+  if (ASSET_CATEGORIES.MAJORS.includes(base)) return 1;
+  if (ASSET_CATEGORIES.L1_L2.includes(base)) return 2;
+  if (ASSET_CATEGORIES.DEFI.includes(base)) return 3;
+  if (ASSET_CATEGORIES.AI.includes(base)) return 4;
+  if (ASSET_CATEGORIES.ORACLE_DATA.includes(base)) return 5;
+  if (ASSET_CATEGORIES.MEME.includes(base)) return 6;
+  if (ASSET_CATEGORIES.GAMING.includes(base)) return 7;
+  
+  return 10; // Unknown/low priority
+}
+
+/**
+ * Generate smart pair combinations using sector-based grouping
+ * Pairs assets within the same category for higher correlation probability
+ * @param pairCount - Number of pair combinations to generate
+ * @returns Array of intelligently paired market combinations
+ */
+export async function generateSmartPairCombinations(
+  pairCount: number = 2
+): Promise<Array<{
+  marketIndexA: number;
+  marketIndexB: number;
+  symbolA: string;
+  symbolB: string;
+  description: string;
+}>> {
+  const allMarkets = await fetchAvailablePerpMarkets();
+  
+  // Sort by priority (majors first, then alts)
+  const sortedMarkets = allMarkets
+    .sort((a, b) => getMarketPriority(a.symbol) - getMarketPriority(b.symbol));
+
+  // Group markets by category
+  const categorizedMarkets = new Map<string, DriftMarket[]>();
+  
+  for (const market of sortedMarkets) {
+    const category = categorizeAsset(market.symbol);
+    if (category) {
+      if (!categorizedMarkets.has(category)) {
+        categorizedMarkets.set(category, []);
+      }
+      categorizedMarkets.get(category)!.push(market);
+    }
+  }
+
+  const pairs: Array<{
+    marketIndexA: number;
+    marketIndexB: number;
+    symbolA: string;
+    symbolB: string;
+    description: string;
+  }> = [];
+
+  // Strategy 1: Pair within same category (70% of pairs)
+  const sameCategory = Math.ceil(pairCount * 0.7);
+  
+  for (const [category, markets] of categorizedMarkets.entries()) {
+    if (pairs.length >= sameCategory) break;
+    
+    // Shuffle within category to add some randomness
+    const shuffled = [...markets].sort(() => Math.random() - 0.5);
+    
+    for (let i = 0; i + 1 < shuffled.length && pairs.length < sameCategory; i += 2) {
+      const marketA = shuffled[i];
+      const marketB = shuffled[i + 1];
+      
+      pairs.push({
+        marketIndexA: marketA.marketIndex,
+        marketIndexB: marketB.marketIndex,
+        symbolA: marketA.symbol,
+        symbolB: marketB.symbol,
+        description: `${category} pair: ${marketA.symbol}/${marketB.symbol}`,
+      });
+    }
+  }
+
+  // Strategy 2: Cross-category pairs (30% of pairs) for diversification
+  const crossCategory = pairCount - pairs.length;
+  const majorMarkets = categorizedMarkets.get('MAJORS') || [];
+  const otherCategories = Array.from(categorizedMarkets.entries())
+    .filter(([cat]) => cat !== 'MAJORS')
+    .flatMap(([_, markets]) => markets);
+  
+  const shuffledOthers = [...otherCategories].sort(() => Math.random() - 0.5);
+  
+  for (let i = 0; i < crossCategory && i < majorMarkets.length && i < shuffledOthers.length; i++) {
+    const marketA = majorMarkets[i % majorMarkets.length];
+    const marketB = shuffledOthers[i];
+    
+    pairs.push({
+      marketIndexA: marketA.marketIndex,
+      marketIndexB: marketB.marketIndex,
+      symbolA: marketA.symbol,
+      symbolB: marketB.symbol,
+      description: `Cross-sector: ${marketA.symbol}/${marketB.symbol}`,
+    });
+  }
+
+  console.log(`[PAIR_SELECTOR] 🎯 Selected ${pairs.length} smart market pairs for analysis`);
+  pairs.forEach((p) => console.log(`  - ${p.description}`));
+
+  return pairs;
+}

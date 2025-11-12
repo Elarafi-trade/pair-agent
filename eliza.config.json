@@ -21,13 +21,13 @@
       "BTC-PERP/ETH-PERP",
       "SOL-PERP/AVAX-PERP",
       "ARB-PERP/OP-PERP",
-      "MATIC-PERP/ADA-PERP",
-      "DOT-PERP/ATOM-PERP",
-      "UNI-PERP/SUSHI-PERP",
-      "AAVE-PERP/COMP-PERP",
-      "LINK-PERP/GRT-PERP",
-      "RNDR-PERP/FET-PERP",
-      "NEAR-PERP/FTM-PERP"
+      "SOL-PERP/JTO-PERP",
+      "SOL-PERP/WIF-PERP",
+      "RENDER-PERP/TAO-PERP",
+      "LINK-PERP/PYTH-PERP",
+      "ETH-PERP/BNB-PERP",
+      "ADA-PERP/AVAX-PERP",
+      "XRP-PERP/LTC-PERP"
     ]
   },
   "exitConditions": {
