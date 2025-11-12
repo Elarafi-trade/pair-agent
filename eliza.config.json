@@ -12,11 +12,11 @@
     "maxScansPerCycle": 50,
     "scanDelayMs": 5000,
     "zScoreThreshold": 1.8,
-    "correlationThreshold": 0.75,
+    "correlationThreshold": 0.70,
     "randomPairCount": 5,
     "halfLifePeriods": 10,
     "volatilityWindow": 20,
-    "dynamicZScore": false,
+    "dynamicZScore": true,
     "predefinedFallbackPairs": [
       "BTC-PERP/ETH-PERP",
       "SOL-PERP/AVAX-PERP",

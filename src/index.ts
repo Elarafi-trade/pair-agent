@@ -482,6 +482,12 @@ async function runAnalysisCycle(config: Config): Promise<void> {
     }
 
     if (!signalFound) {
+      // Check if we've run out of unique pairs to scan
+      if (randomPairs.length === 0) {
+        console.log(`\n[SCAN] ⚠️ Exhausted all available unique pairs (${scannedPairsThisCycle.size} scanned). Ending cycle.`);
+        break;
+      }
+      
       // Reached cap? Try predefined fallback pairs before ending cycle
       if (scanCount >= maxScans) {
         console.log(`\n[SCAN] Reached max scans per cycle (${maxScans}). Testing predefined fallback pairs...`);

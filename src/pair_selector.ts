@@ -199,8 +199,9 @@ export async function generateSmartPairCombinations(
   const sortedMarkets = allMarkets
     .sort((a, b) => getMarketPriority(a.symbol) - getMarketPriority(b.symbol));
 
-  // Group markets by category
+  // Group markets by category (including uncategorized)
   const categorizedMarkets = new Map<string, DriftMarket[]>();
+  const uncategorizedMarkets: DriftMarket[] = [];
   
   for (const market of sortedMarkets) {
     const category = categorizeAsset(market.symbol);
@@ -209,6 +210,19 @@ export async function generateSmartPairCombinations(
         categorizedMarkets.set(category, []);
       }
       categorizedMarkets.get(category)!.push(market);
+    } else {
+      uncategorizedMarkets.push(market);
+    }
+  }
+  
+  // Debug: Log market distribution
+  if (excluded.size === 0) {
+    console.log(`[PAIR_SELECTOR] Market distribution:`);
+    for (const [category, markets] of categorizedMarkets.entries()) {
+      console.log(`  - ${category}: ${markets.length} markets`);
+    }
+    if (uncategorizedMarkets.length > 0) {
+      console.log(`  - UNCATEGORIZED: ${uncategorizedMarkets.length} markets`);
     }
   }
 
@@ -229,52 +243,100 @@ export async function generateSmartPairCombinations(
   // Strategy 1: Pair within same category (70% of pairs)
   const sameCategory = Math.ceil(pairCount * 0.7);
   
+  // Generate all possible same-category combinations
+  const sameCategoryCandidates: Array<{
+    marketA: DriftMarket;
+    marketB: DriftMarket;
+    category: string;
+  }> = [];
+  
   for (const [category, markets] of categorizedMarkets.entries()) {
-    if (pairs.length >= sameCategory) break;
-    
-    // Shuffle within category to add some randomness
-    const shuffled = [...markets].sort(() => Math.random() - 0.5);
-    
-    for (let i = 0; i + 1 < shuffled.length && pairs.length < sameCategory; i += 2) {
-      const marketA = shuffled[i];
-      const marketB = shuffled[i + 1];
-      
-      // Skip if this pair was already scanned
-      if (isPairExcluded(marketA.symbol, marketB.symbol)) {
-        continue;
+    // Generate all unique pairs within this category
+    for (let i = 0; i < markets.length; i++) {
+      for (let j = i + 1; j < markets.length; j++) {
+        const marketA = markets[i];
+        const marketB = markets[j];
+        
+        // Skip if already scanned
+        if (!isPairExcluded(marketA.symbol, marketB.symbol)) {
+          sameCategoryCandidates.push({ marketA, marketB, category });
+        }
       }
-      
-      pairs.push({
-        marketIndexA: marketA.marketIndex,
-        marketIndexB: marketB.marketIndex,
-        symbolA: marketA.symbol,
-        symbolB: marketB.symbol,
-        description: `${category} pair: ${marketA.symbol}/${marketB.symbol}`,
-      });
     }
   }
+  
+  // Shuffle and pick from available same-category candidates
+  const shuffledSameCategory = sameCategoryCandidates.sort(() => Math.random() - 0.5);
+  
+  for (let i = 0; i < Math.min(sameCategory, shuffledSameCategory.length); i++) {
+    const { marketA, marketB, category } = shuffledSameCategory[i];
+    
+    pairs.push({
+      marketIndexA: marketA.marketIndex,
+      marketIndexB: marketB.marketIndex,
+      symbolA: marketA.symbol,
+      symbolB: marketB.symbol,
+      description: `${category} pair: ${marketA.symbol}/${marketB.symbol}`,
+    });
+  }
 
-  // Strategy 2: Cross-category pairs (30% of pairs) for diversification
+  // Strategy 2: Cross-category pairs (remaining to reach pairCount)
   const majorMarkets = categorizedMarkets.get('MAJORS') || [];
   const otherCategories = Array.from(categorizedMarkets.entries())
     .filter(([cat]) => cat !== 'MAJORS')
     .flatMap(([_, markets]) => markets);
   
-  const shuffledOthers = [...otherCategories].sort(() => Math.random() - 0.5);
+  // Generate all possible cross-category combinations
+  const crossCategoryCandidates: Array<{
+    marketA: DriftMarket;
+    marketB: DriftMarket;
+  }> = [];
   
-  let attempts = 0;
-  const maxAttempts = shuffledOthers.length * 2; // Prevent infinite loop
-  
-  for (let i = 0; pairs.length < pairCount && attempts < maxAttempts; i++, attempts++) {
-    const marketA = majorMarkets[i % majorMarkets.length];
-    const marketB = shuffledOthers[i % shuffledOthers.length];
-    
-    if (!marketA || !marketB) break;
-    
-    // Skip if this pair was already scanned
-    if (isPairExcluded(marketA.symbol, marketB.symbol)) {
-      continue;
+  for (const majorMarket of majorMarkets) {
+    for (const otherMarket of otherCategories) {
+      if (!isPairExcluded(majorMarket.symbol, otherMarket.symbol)) {
+        crossCategoryCandidates.push({
+          marketA: majorMarket,
+          marketB: otherMarket,
+        });
+      }
     }
+  }
+  
+  // Strategy 3: If still need more pairs, pair ALL remaining uncategorized markets
+  for (let i = 0; i < uncategorizedMarkets.length; i++) {
+    for (let j = i + 1; j < uncategorizedMarkets.length; j++) {
+      const marketA = uncategorizedMarkets[i];
+      const marketB = uncategorizedMarkets[j];
+      
+      if (!isPairExcluded(marketA.symbol, marketB.symbol)) {
+        crossCategoryCandidates.push({
+          marketA,
+          marketB,
+        });
+      }
+    }
+  }
+  
+  // Strategy 4: Cross-pair uncategorized with categorized markets
+  const allCategorizedMarkets = Array.from(categorizedMarkets.values()).flat();
+  for (const uncatMarket of uncategorizedMarkets) {
+    for (const catMarket of allCategorizedMarkets) {
+      if (!isPairExcluded(uncatMarket.symbol, catMarket.symbol)) {
+        crossCategoryCandidates.push({
+          marketA: uncatMarket,
+          marketB: catMarket,
+        });
+      }
+    }
+  }
+  
+  // Shuffle and pick remaining needed pairs
+  const shuffledCrossCategory = crossCategoryCandidates.sort(() => Math.random() - 0.5);
+  const neededPairs = pairCount - pairs.length;
+  
+  for (let i = 0; i < Math.min(neededPairs, shuffledCrossCategory.length); i++) {
+    const { marketA, marketB } = shuffledCrossCategory[i];
     
     pairs.push({
       marketIndexA: marketA.marketIndex,
@@ -286,7 +348,9 @@ export async function generateSmartPairCombinations(
   }
 
   if (excluded.size > 0 && pairs.length < pairCount) {
-    console.log(`[PAIR_SELECTOR] ⚠️ Could only find ${pairs.length}/${pairCount} unique pairs (${excluded.size} already scanned)`);
+    const totalPossible = sameCategoryCandidates.length + crossCategoryCandidates.length;
+    console.log(`[PAIR_SELECTOR] ⚠️ Could only find ${pairs.length}/${pairCount} unique pairs`);
+    console.log(`[PAIR_SELECTOR] Stats: ${excluded.size} already scanned, ${totalPossible} total possible, ${allMarkets.length} markets available`);
   }
   
   console.log(`[PAIR_SELECTOR] 🎯 Selected ${pairs.length} smart market pairs for analysis`);
