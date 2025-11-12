@@ -434,6 +434,7 @@ async function runAnalysisCycle(config: Config): Promise<void> {
   let scanCount = 0;
   const maxScans = config.analysis.maxScansPerCycle ?? 20;
   const maxTrades = config.riskManagement?.maxConcurrentTrades ?? 5;
+  const scannedPairsThisCycle = new Set<string>(); // Track scanned pairs to avoid duplicates
 
   // Keep scanning until a trade signal is found
   while (!signalFound) {
@@ -449,12 +450,16 @@ async function runAnalysisCycle(config: Config): Promise<void> {
     // Generate smart pairs from Drift Protocol (sector-based for better correlation)
     console.log(`[PAIR_SELECTOR] Scan #${scanCount} - Generating smart sector-based pairs...`);
     const pairCount = config.analysis.randomPairCount ?? 3;
-    const randomPairs = await generateSmartPairCombinations(pairCount);
+    const randomPairs = await generateSmartPairCombinations(pairCount, scannedPairsThisCycle);
 
-    console.log(`[PAIR_SELECTOR] Selected ${randomPairs.length} pairs for this scan\n`);
+    console.log(`[PAIR_SELECTOR] Selected ${randomPairs.length} pairs for this scan (${scannedPairsThisCycle.size} already scanned this cycle)\n`);
 
     // Analyze each pair sequentially
     for (const pair of randomPairs) {
+      // Mark this pair as scanned (create unique key)
+      const pairKey = [pair.symbolA, pair.symbolB].sort().join('/');
+      scannedPairsThisCycle.add(pairKey);
+      
       const hasSignal = await analyzeSinglePair(
         pair.marketIndexA,
         pair.marketIndexB,

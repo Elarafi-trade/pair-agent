@@ -179,10 +179,12 @@ function getMarketPriority(symbol: string): number {
  * Generate smart pair combinations using sector-based grouping
  * Pairs assets within the same category for higher correlation probability
  * @param pairCount - Number of pair combinations to generate
+ * @param excludedPairs - Set of already scanned pair keys (e.g., "ARB-PERP/OP-PERP") to avoid duplicates
  * @returns Array of intelligently paired market combinations
  */
 export async function generateSmartPairCombinations(
-  pairCount: number = 2
+  pairCount: number = 2,
+  excludedPairs?: Set<string>
 ): Promise<Array<{
   marketIndexA: number;
   marketIndexB: number;
@@ -191,6 +193,7 @@ export async function generateSmartPairCombinations(
   description: string;
 }>> {
   const allMarkets = await fetchAvailablePerpMarkets();
+  const excluded = excludedPairs || new Set<string>();
   
   // Sort by priority (majors first, then alts)
   const sortedMarkets = allMarkets
@@ -217,6 +220,12 @@ export async function generateSmartPairCombinations(
     description: string;
   }> = [];
 
+  // Helper function to check if pair is excluded
+  const isPairExcluded = (symbolA: string, symbolB: string): boolean => {
+    const pairKey = [symbolA, symbolB].sort().join('/');
+    return excluded.has(pairKey);
+  };
+
   // Strategy 1: Pair within same category (70% of pairs)
   const sameCategory = Math.ceil(pairCount * 0.7);
   
@@ -230,6 +239,11 @@ export async function generateSmartPairCombinations(
       const marketA = shuffled[i];
       const marketB = shuffled[i + 1];
       
+      // Skip if this pair was already scanned
+      if (isPairExcluded(marketA.symbol, marketB.symbol)) {
+        continue;
+      }
+      
       pairs.push({
         marketIndexA: marketA.marketIndex,
         marketIndexB: marketB.marketIndex,
@@ -241,7 +255,6 @@ export async function generateSmartPairCombinations(
   }
 
   // Strategy 2: Cross-category pairs (30% of pairs) for diversification
-  const crossCategory = pairCount - pairs.length;
   const majorMarkets = categorizedMarkets.get('MAJORS') || [];
   const otherCategories = Array.from(categorizedMarkets.entries())
     .filter(([cat]) => cat !== 'MAJORS')
@@ -249,9 +262,19 @@ export async function generateSmartPairCombinations(
   
   const shuffledOthers = [...otherCategories].sort(() => Math.random() - 0.5);
   
-  for (let i = 0; i < crossCategory && i < majorMarkets.length && i < shuffledOthers.length; i++) {
+  let attempts = 0;
+  const maxAttempts = shuffledOthers.length * 2; // Prevent infinite loop
+  
+  for (let i = 0; pairs.length < pairCount && attempts < maxAttempts; i++, attempts++) {
     const marketA = majorMarkets[i % majorMarkets.length];
-    const marketB = shuffledOthers[i];
+    const marketB = shuffledOthers[i % shuffledOthers.length];
+    
+    if (!marketA || !marketB) break;
+    
+    // Skip if this pair was already scanned
+    if (isPairExcluded(marketA.symbol, marketB.symbol)) {
+      continue;
+    }
     
     pairs.push({
       marketIndexA: marketA.marketIndex,
@@ -262,6 +285,10 @@ export async function generateSmartPairCombinations(
     });
   }
 
+  if (excluded.size > 0 && pairs.length < pairCount) {
+    console.log(`[PAIR_SELECTOR] ⚠️ Could only find ${pairs.length}/${pairCount} unique pairs (${excluded.size} already scanned)`);
+  }
+  
   console.log(`[PAIR_SELECTOR] 🎯 Selected ${pairs.length} smart market pairs for analysis`);
   pairs.forEach((p) => console.log(`  - ${p.description}`));
 
