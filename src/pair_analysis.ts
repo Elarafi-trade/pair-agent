@@ -380,18 +380,25 @@ export function meetsTradeSignalCriteria(
     minSharpe?: number;
     maxVolatility?: number;
     dynamicZScore?: boolean; // Enable dynamic z-score adjustment
+    halfLifeEnforced?: boolean; // When false, do not hard-reject on half-life
+    allowInfinityWithAdfBelow?: number; // If half-life is Infinity but ADF p <= this, allow
   }
 ): boolean {
   // FIRST: Check half-life filter (reject early if too slow/fast)
-  if (config) {
-    if (
-      config.maxHalfLife !== undefined &&
-      result.halfLife !== undefined &&
-      (result.halfLife > config.maxHalfLife || result.halfLife < 1)
-    ) {
-      console.log(
-        `[FILTER] Half-life ${result.halfLife.toFixed(1)}h outside acceptable range (1 - ${config.maxHalfLife}h)`
-      );
+  if (config && result.halfLife !== undefined) {
+    const enforceHL = config.halfLifeEnforced !== undefined ? config.halfLifeEnforced : true;
+    const maxHL = config.maxHalfLife;
+
+    if (!isFinite(result.halfLife)) {
+      // κ >= 0 → non-mean-reverting in Δs regression
+      if (config?.allowInfinityWithAdfBelow !== undefined && result.cointegrationPValue <= config.allowInfinityWithAdfBelow) {
+        console.log(`[FILTER] Half-life = ∞ but ADF p=${result.cointegrationPValue.toFixed(2)} ≤ ${config.allowInfinityWithAdfBelow}. Allowing.`);
+      } else if (enforceHL) {
+        console.log(`[FILTER] Non-mean-reverting (κ ≥ 0): half-life = ∞. Skipping.`);
+        return false;
+      }
+    } else if (maxHL !== undefined && (result.halfLife > maxHL || result.halfLife < 1)) {
+      console.log(`[FILTER] Half-life ${result.halfLife.toFixed(1)}h outside acceptable range (1 - ${maxHL}h)`);
       return false;
     }
   }

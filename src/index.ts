@@ -51,6 +51,8 @@ interface Config {
     halfLifePeriods?: number;        // 🆕 Max half-life in periods (default: 100)
     volatilityWindow?: number;
     dynamicZScore?: boolean;
+    halfLifeEnforced?: boolean;      // 🆕 If false, do not hard-reject on half-life (default: true)
+    allowInfinityWithAdfBelow?: number; // 🆕 Allow Infinity half-life if ADF p-value ≤ this (e.g., 0.20)
     stopOnFirstSignal?: boolean;     // 🆕 If true, end cycle after first trade; if false, keep scanning
   };
   exitConditions?: {
@@ -125,19 +127,19 @@ async function analyzeSinglePair(
     console.log(formatAnalysisReport(symbolA, symbolB, result, { timeframe: '1h' }));
 
     // Check if meets trade criteria and has a directional signal
-    const meetsCriteria = meetsTradeSignalCriteria(
-      result,
-      config.analysis.zScoreThreshold,
-      config.analysis.correlationThreshold,
-      {
-        maxHalfLife: config.analysis.halfLifePeriods,
-        minSharpe: config.riskManagement.minSharpeRatio,
-        maxVolatility: config.filters?.maxVolatility,
-        dynamicZScore: config.analysis.dynamicZScore, // Enable dynamic z-score adjustment
-      }
-    );
-
-    const hasDirectionalSignal = result.signalType !== 'neutral';
+  const meetsCriteria = meetsTradeSignalCriteria(
+    result,
+    config.analysis.zScoreThreshold,
+    config.analysis.correlationThreshold,
+    {
+      maxHalfLife: config.analysis.halfLifePeriods,
+      minSharpe: config.riskManagement.minSharpeRatio,
+      maxVolatility: config.filters?.maxVolatility,
+      dynamicZScore: config.analysis.dynamicZScore, // Enable dynamic z-score adjustment
+      halfLifeEnforced: config.analysis.halfLifeEnforced,
+      allowInfinityWithAdfBelow: config.analysis.allowInfinityWithAdfBelow,
+    }
+  );    const hasDirectionalSignal = result.signalType !== 'neutral';
 
     if (meetsCriteria && hasDirectionalSignal) {
       console.log(`[SIGNAL] ⚡ Trade signal detected! (criteria OK, signal: ${result.signalType.toUpperCase()})`);
@@ -446,8 +448,17 @@ async function runAnalysisCycle(config: Config): Promise<void> {
   const maxTrades = config.riskManagement?.maxConcurrentTrades ?? 5;
   const scannedPairsThisCycle = new Set<string>(); // Track scanned pairs to avoid duplicates
 
-  // Keep scanning until a trade signal is found
-  while (!signalFound) {
+  // Respect configuration: optionally continue scanning to open more trades
+  const stopAfterFirst = config.analysis.stopOnFirstSignal !== undefined
+    ? config.analysis.stopOnFirstSignal
+    : true; // default behavior: stop after first
+
+  // Keep scanning until limits reached; optionally stop after first signal
+  while (true) {
+    // If configured to stop after first and we already found one, end cycle
+    if (stopAfterFirst && signalFound) {
+      break;
+    }
     // Check if max concurrent trades already reached - stop scanning
     const currentOpenTrades = getOpenTrades();
     if (currentOpenTrades.length >= maxTrades) {
@@ -481,11 +492,6 @@ async function runAnalysisCycle(config: Config): Promise<void> {
         // Mark that we found at least one signal in this cycle
         signalFound = true;
         console.log(`\n[SUCCESS] ✅ Trade signal found after ${scanCount} scan(s)!`);
-
-        // Respect configuration: optionally continue scanning to open more trades
-        const stopAfterFirst = config.analysis.stopOnFirstSignal !== undefined
-          ? config.analysis.stopOnFirstSignal
-          : true; // default behavior: stop after first
 
         if (stopAfterFirst) {
           break; // Exit the for loop and end cycle early
@@ -546,7 +552,12 @@ async function runAnalysisCycle(config: Config): Promise<void> {
               if (hasSignal) {
                 signalFound = true;
                 console.log(`\n[SUCCESS] ✅ Trade signal found in fallback pair ${symbolA}/${symbolB}!`);
-                break; // Exit fallback loop
+                // If stopAfterFirst is true, exit fallback loop; otherwise continue to try more if capacity allows
+                if (stopAfterFirst) {
+                  break; // Exit fallback loop
+                } else {
+                  // Continue evaluating remaining fallback pairs; capacity checks below will govern outer loop
+                }
               }
 
               // Delay between fallback pairs
@@ -566,12 +577,29 @@ async function runAnalysisCycle(config: Config): Promise<void> {
         } else {
           console.log(`[SCAN] No fallback pairs configured. Ending cycle without a trade.`);
         }
-        break;
+        // Decide whether to end the cycle after fallback pass
+        const currentOpenTradesAfterFallback = getOpenTrades().length;
+        if (signalFound && !stopAfterFirst && currentOpenTradesAfterFallback < maxTrades) {
+          const delayMs = config.analysis.scanDelayMs ?? 3000;
+          console.log(`[FALLBACK] Signal found and capacity remains (${currentOpenTradesAfterFallback}/${maxTrades}). Continuing after ${delayMs}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+          // Continue outer loop without breaking
+        } else {
+          console.log(`[SCAN] Ending cycle after fallback. Reason: ${!signalFound ? 'no-signal' : (stopAfterFirst ? 'stopOnFirstSignal=true' : 'capacity-reached-or-scan-cap')}`);
+          break;
+        }
       }
       console.log(`\n[SCAN] No signals found in scan #${scanCount}. Generating new random pairs...\n`);
       // Delay before next scan cycle to avoid hammering the API
       const delayMs = config.analysis.scanDelayMs ?? 3000;
       await new Promise(resolve => setTimeout(resolve, delayMs));
+    } else {
+      // We found at least one signal in this scan. If continuing, pace before next scan.
+      if (!stopAfterFirst) {
+        const delayMs = config.analysis.scanDelayMs ?? 3000;
+        console.log(`[SCAN] Signal found in scan #${scanCount}. Continuing after ${delayMs}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
     }
   }
 

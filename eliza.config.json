@@ -17,6 +17,8 @@
     "halfLifePeriods": 50,
     "volatilityWindow": 20,
     "dynamicZScore": true,
+    "halfLifeEnforced": true,
+    "allowInfinityWithAdfBelow": 0.20,
     "stopOnFirstSignal": false,
     "predefinedFallbackPairs": [
       "BTC-PERP/ETH-PERP",
