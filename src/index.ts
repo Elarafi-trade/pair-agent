@@ -179,6 +179,15 @@ async function analyzeSinglePair(
         return false;
       }
 
+      // Disallow opening duplicate positions on the exact same pair (order-insensitive)
+      const normalizePair = (a: string, b: string) => [a, b].sort().join('/');
+      const targetKey = normalizePair(symbolA, symbolB);
+      const hasSamePairOpen = openTrades.some(t => normalizePair(t.symbolA, t.symbolB) === targetKey);
+      if (hasSamePairOpen) {
+        console.log(`[RISK] ⚠️ Duplicate pair already open (${targetKey}). Skipping.`);
+        return false;
+      }
+
       // Execute simulated trade
       const currentPriceA = dataA.prices[dataA.prices.length - 1];
       const currentPriceB = dataB.prices[dataB.prices.length - 1];
