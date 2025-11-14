@@ -382,7 +382,21 @@ export function meetsTradeSignalCriteria(
     dynamicZScore?: boolean; // Enable dynamic z-score adjustment
   }
 ): boolean {
-  // Dynamic z-score adjustment based on half-life (if enabled)
+  // FIRST: Check half-life filter (reject early if too slow/fast)
+  if (config) {
+    if (
+      config.maxHalfLife !== undefined &&
+      result.halfLife !== undefined &&
+      (result.halfLife > config.maxHalfLife || result.halfLife < 1)
+    ) {
+      console.log(
+        `[FILTER] Half-life ${result.halfLife.toFixed(1)}h outside acceptable range (1 - ${config.maxHalfLife}h)`
+      );
+      return false;
+    }
+  }
+
+  // SECOND: Dynamic z-score adjustment based on half-life (if enabled)
   let effectiveZThreshold = zScoreThreshold;
   
   if (config?.dynamicZScore && result.halfLife !== undefined && isFinite(result.halfLife)) {
@@ -414,23 +428,15 @@ export function meetsTradeSignalCriteria(
     }
   }
 
-  // Basic criteria with dynamic threshold
+  // THIRD: Basic criteria with dynamic threshold
   const meetsBasic =
     Math.abs(result.zScore) >= effectiveZThreshold &&
     Math.abs(result.corr) >= corrThreshold;
 
   if (!meetsBasic) return false;
 
-  // Advanced criteria (if config provided)
+  // FOURTH: Remaining advanced criteria (if config provided)
   if (config) {
-    // Check half-life (reject if too slow or too fast)
-    if (
-      config.maxHalfLife !== undefined &&
-      result.halfLife !== undefined &&
-      (result.halfLife > config.maxHalfLife || result.halfLife < 1)
-    ) {
-      return false;
-    }
 
     // Check Sharpe ratio
     if (

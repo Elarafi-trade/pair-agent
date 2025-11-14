@@ -51,6 +51,7 @@ interface Config {
     halfLifePeriods?: number;        // 🆕 Max half-life in periods (default: 100)
     volatilityWindow?: number;
     dynamicZScore?: boolean;
+    stopOnFirstSignal?: boolean;     // 🆕 If true, end cycle after first trade; if false, keep scanning
   };
   exitConditions?: {
     meanReversionThreshold: number;
@@ -468,9 +469,21 @@ async function runAnalysisCycle(config: Config): Promise<void> {
         config
       );
       if (hasSignal) {
+        // Mark that we found at least one signal in this cycle
         signalFound = true;
         console.log(`\n[SUCCESS] ✅ Trade signal found after ${scanCount} scan(s)!`);
-        break; // Exit the for loop
+
+        // Respect configuration: optionally continue scanning to open more trades
+        const stopAfterFirst = config.analysis.stopOnFirstSignal !== undefined
+          ? config.analysis.stopOnFirstSignal
+          : true; // default behavior: stop after first
+
+        if (stopAfterFirst) {
+          break; // Exit the for loop and end cycle early
+        } else {
+          // Continue scanning remaining pairs in this scan batch
+          // but avoid immediate delay here; delay logic below handles pacing
+        }
       }
 
       // Add delay between pair scans to avoid API rate limits
