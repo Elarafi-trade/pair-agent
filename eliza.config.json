@@ -12,7 +12,7 @@
     "maxScansPerCycle": 50,
     "scanDelayMs": 3000,
     "zScoreThreshold": 1.5,
-    "correlationThreshold": 0.70,
+    "correlationThreshold": 0.80,
     "randomPairCount": 8,
     "halfLifePeriods": 50,
     "volatilityWindow": 20,
