@@ -69,7 +69,7 @@ export function calculatePerformanceMetrics(trades: TradeRecord[]): PerformanceM
   }
 
   // Basic counts
-  const totalTrades = closedTrades.length;
+  const totalTrades = closedTrades.length + trades.filter(t => t.status !== 'closed').length;
   const winningTrades = closedTrades.filter(t => (t.closePnL ?? 0) > 0).length;
   const losingTrades = closedTrades.filter(t => (t.closePnL ?? 0) <= 0).length;
   const winRate = (winningTrades / totalTrades) * 100;
