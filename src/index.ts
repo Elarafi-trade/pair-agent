@@ -4,7 +4,7 @@ import 'dotenv/config';
 import { readFile } from 'fs/promises';
 import { fetchPairData, withRetry, fetchCurrentPrice, fetchCurrentPriceBySymbol } from './fetcher.js';
 import { analyzePair, meetsTradeSignalCriteria } from './pair_analysis.js';
-import { formatAnalysisReport } from './narrative.js';
+import { formatAnalysisReportWithLLM } from './narrative.js';
 import {
   executeTrade,
   saveTradeHistory,
@@ -123,8 +123,9 @@ async function analyzeSinglePair(
     // Analyze pair
     const result = analyzePair(dataA.prices, dataB.prices);
 
-    // Display formatted report
-    console.log(formatAnalysisReport(symbolA, symbolB, result, { timeframe: '1h' }));
+    // Display formatted report with AI narrative
+    const report = await formatAnalysisReportWithLLM(symbolA, symbolB, result, { timeframe: '1h' });
+    console.log(report);
 
     // Check if meets trade criteria and has a directional signal
   const meetsCriteria = meetsTradeSignalCriteria(

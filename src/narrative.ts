@@ -1,11 +1,13 @@
-// Copilot: Generate a natural-language summary explaining the pair-trading signal using metrics
 
 import { AnalysisResult } from './pair_analysis.js';
+import axios from 'axios';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
 
 /**
- * Generate a human-readable narrative explaining the analysis results
- * This simulates LLM output - in production, integrate with Eliza's llm.complete()
- * 
+ 
  * @param symbolA - First trading symbol
  * @param symbolB - Second trading symbol
  * @param result - Analysis results
@@ -47,9 +49,7 @@ export function generateNarrative(
 }
 
 /**
- * Generate a detailed analysis prompt for LLM integration
- * Use this with Eliza's llm.complete(prompt) in production
- * 
+
  * @param symbolA - First trading symbol
  * @param symbolB - Second trading symbol
  * @param result - Analysis results
@@ -72,8 +72,8 @@ Provide a concise 1-2 sentence trading insight.`;
 }
 
 /**
- * Example integration with Eliza LLM (mock)
- * In production, replace with actual Eliza agent.respond() or llm.complete()
+ * Generate LLM-powered narrative using OpenRouter API
+ * Falls back to rule-based narrative on error
  * 
  * @param symbolA - First trading symbol
  * @param symbolB - Second trading symbol
@@ -85,20 +85,63 @@ export async function generateLLMNarrative(
   symbolB: string,
   result: AnalysisResult
 ): Promise<string> {
-  // Mock implementation - replace with actual Eliza integration
-  // Example: const insight = await llm.complete(buildLLMPrompt(...));
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  
+  // Fallback if no API key
+  if (!apiKey) {
+    console.log('[LLM] No OPENROUTER_API_KEY found, using rule-based narrative');
+    return generateNarrative(symbolA, symbolB, result);
+  }
   
   const prompt = buildLLMPrompt(symbolA, symbolB, result);
   
-  // For now, return the rule-based narrative
-  // TODO: Integrate with Eliza OS llm.complete(prompt)
-  console.log(`[LLM Prompt]\n${prompt}\n`);
-  
-  return generateNarrative(symbolA, symbolB, result);
+  try {
+    console.log(`[LLM] Calling OpenRouter API...`);
+    
+    const response = await axios.post(
+      'https://openrouter.ai/api/v1/chat/completions',
+      {
+        model: 'openrouter/free', // Free model selector
+        messages: [
+          {
+            role: 'user',
+            content: `${prompt}\n\nProvide exactly 1-2 sentences. Be direct and concise—state the key insight and trade recommendation only.`
+          }
+        ],
+        max_tokens: 80,
+        temperature: 0.3
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://github.com/pair-agent',
+          'X-Title': 'Pair Trading Agent'
+        },
+        timeout: 15000 // 15 second timeout
+      }
+    );
+    
+    const llmNarrative = response.data?.choices?.[0]?.message?.content?.trim();
+    
+    if (llmNarrative && llmNarrative.length > 10) {
+      console.log(`[LLM] ✓ Generated narrative via OpenRouter`);
+      return llmNarrative;
+    } else {
+      throw new Error('Empty or invalid response from OpenRouter');
+    }
+    
+  } catch (error) {
+    // Fallback to rule-based narrative on any error
+    console.error('[LLM] ✗ OpenRouter API error, falling back to rule-based narrative:', 
+      error instanceof Error ? error.message : 'Unknown error'
+    );
+    return generateNarrative(symbolA, symbolB, result);
+  }
 }
 
 /**
- * Format analysis results as a structured report
+ * Format analysis results as a structured report (synchronous, rule-based narrative)
  * Useful for logging or displaying results
  * 
  * @param symbolA - First trading symbol
@@ -149,6 +192,66 @@ Legs:         ${signalDetail}
 ${currentPricesLine}─────────────────────────────────────────────
 Narrative:
 ${generateNarrative(symbolA, symbolB, result)}
+═══════════════════════════════════════════
+`;
+  return report;
+}
+
+/**
+ * Format analysis results with AI-generated narrative (async)
+ * 
+ * @param symbolA - First trading symbol
+ * @param symbolB - Second trading symbol
+ * @param result - Analysis results
+ * @param opts - Optional current prices and timeframe
+ * @returns Formatted report string with LLM narrative
+ */
+export async function formatAnalysisReportWithLLM(
+  symbolA: string,
+  symbolB: string,
+  result: AnalysisResult,
+  opts?: { currentPriceA?: number; currentPriceB?: number; timeframe?: string }
+): Promise<string> {
+  // Build explicit signal string with legs
+  let signalDetail = 'NEUTRAL';
+  if (result.signalType === 'short') {
+    signalDetail = `SHORT ${symbolA}, LONG ${symbolB}`;
+  } else if (result.signalType === 'long') {
+    signalDetail = `LONG ${symbolA}, SHORT ${symbolB}`;
+  }
+
+  const currentPricesLine =
+    opts?.currentPriceA !== undefined && opts?.currentPriceB !== undefined
+      ? `Current Px:  ${symbolA}: $${opts.currentPriceA.toFixed(2)}  ${symbolB}: $${opts.currentPriceB.toFixed(2)}\n`
+      : '';
+
+  // Get AI-generated narrative
+  const narrative = await generateLLMNarrative(symbolA, symbolB, result);
+
+  const report = `
+═══════════════════════════════════════════
+  PAIR ANALYSIS REPORT
+═══════════════════════════════════════════
+Pair:         ${symbolA} / ${symbolB}
+Correlation:  ${result.corr.toFixed(3)}
+Z-Score:      ${result.zScore.toFixed(2)}
+Mean:        ${result.mean.toFixed(2)}
+isCointegrated: ${result.isCointegrated ? 'YES' : 'NO'}
+cointegrationPValue: ${result.cointegrationPValue.toFixed(4)}
+Beta:         ${result.beta.toFixed(3)}
+Timeframe:    ${opts?.timeframe ?? 'n/a'}
+─────────────────────────────────────────────
+Spread Stats:
+  Mean:       ${result.mean.toFixed(2)}
+  Std Dev:    ${result.std.toFixed(2)}
+  Current:    ${result.spread.toFixed(2)}
+  Z-Score:    ${result.zScore.toFixed(2)}
+─────────────────────────────────────────────
+Signal:       ${signalDetail}
+Legs:         ${signalDetail}
+${currentPricesLine}─────────────────────────────────────────────
+Narrative:
+${narrative}
 ═══════════════════════════════════════════
 `;
   return report;

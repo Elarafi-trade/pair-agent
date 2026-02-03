@@ -11,7 +11,7 @@ import { initializeTables, getAllTrades, getPerformanceMetrics } from './db.js';
 // Analysis helpers
 import { fetchPairData, withRetry } from './fetcher.js';
 import { analyzePair, meetsTradeSignalCriteria } from './pair_analysis.js';
-import { generateNarrative } from './narrative.js';
+import { generateLLMNarrative } from './narrative.js';
 
 const PORT = Number(process.env.PORT || 3000);
 
@@ -106,8 +106,8 @@ const server = http.createServer(async (req, res) => {
         // Analyze the pair
         const analysis = analyzePair(dataA.prices, dataB.prices);
 
-        // Generate narrative
-        const narrative = generateNarrative(symbolA, symbolB, analysis);
+        // Generate AI narrative
+        const narrative = await generateLLMNarrative(symbolA, symbolB, analysis);
 
         // Load config for thresholds (fallback to sensible defaults)
         const config = await loadConfigSafe();
